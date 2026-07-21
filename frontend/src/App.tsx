@@ -8,6 +8,7 @@ import { useState, useEffect } from 'react';
 import Sidebar from '@/components/Layout/Sidebar';
 import TopBar from '@/components/Layout/TopBar';
 import Login from '@/pages/Login';
+import Register from '@/pages/Register';
 import Home from '@/pages/Home';
 import KnowledgeBase from '@/pages/KnowledgeBase';
 import TechExperts from '@/pages/TechExperts';
@@ -108,6 +109,7 @@ function App() {
       <Routes>
         {/* 登录页（不需要布局） */}
         <Route path="/login" element={<Login />} />
+        <Route path="/register" element={<Register />} />
 
         {/* 需要鉴权的页面 */}
         <Route

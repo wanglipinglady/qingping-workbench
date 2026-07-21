@@ -56,7 +56,7 @@ def get_db() -> Generator[Session, None, None]:
 
 def init_db() -> None:
     """
-    初始化数据库：创建所有表
+    初始化数据库：创建所有表 + 初始化默认数据
     在应用启动时调用
     """
     # 导入所有模型，确保 Base 能识别到它们
@@ -67,3 +67,34 @@ def init_db() -> None:
     from app.plugins.wechat_writer import models as wechat_models  # noqa: F401
 
     Base.metadata.create_all(bind=engine)
+
+    # 初始化默认管理员用户
+    _init_default_user()
+
+
+def _init_default_user() -> None:
+    """初始化默认管理员用户（如果不存在的话）"""
+    from app.plugins.user.models import User
+    from app.core.auth import hash_password
+
+    db = SessionLocal()
+    try:
+        # 检查 admin 用户是否已存在
+        existing = db.query(User).filter(User.username == "admin").first()
+        if existing:
+            return
+
+        # 创建默认 admin 用户
+        admin = User(
+            username="admin",
+            email="admin@qingping.local",
+            hashed_password=hash_password("admin123"),
+        )
+        db.add(admin)
+        db.commit()
+        print("✅ 默认管理员用户已创建: admin / admin123")
+    except Exception as e:
+        print(f"⚠️  初始化默认用户失败（可能已存在）: {e}")
+        db.rollback()
+    finally:
+        db.close()

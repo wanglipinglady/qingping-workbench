@@ -4,7 +4,7 @@
  */
 
 import { useState, useEffect } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { useUserStore } from '@/store/useUserStore';
 import Button from '@/components/Common/Button';
 import Input from '@/components/Common/Input';
@@ -164,9 +164,14 @@ export default function Login() {
           {/* 底部提示 */}
           <div className="mt-6 text-center text-sm text-text-tertiary">
             还没有账号？
-            <a href="#" className="text-primary-600 hover:text-primary-700 ml-1">
+            <Link to="/register" className="text-primary-600 hover:text-primary-700 ml-1">
               立即注册
-            </a>
+            </Link>
+          </div>
+
+          {/* 默认账号提示 */}
+          <div className="mt-4 p-3 bg-gray-50 rounded-lg text-xs text-text-tertiary text-center">
+            💡 默认管理员账号：<span className="font-mono text-text-secondary">admin</span> / <span className="font-mono text-text-secondary">admin123</span>
           </div>
         </div>
 
