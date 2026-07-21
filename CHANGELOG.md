@@ -4,6 +4,41 @@
 
 ---
 
+## [2026-07-21] M1·T3 — 状态机引擎 + 选题编辑角色
+
+### 任务概述
+完成写作助手状态机引擎、4 个专家角色配置、选题编辑角色（含 System Prompt），以及状态机操作的完整 API。
+
+### 变更内容
+- 新增 `state_machine.py`：写作助手状态机引擎（7 个状态、正向流转、回退、重新生成、专家切换、SSE 流式）
+- 新增 `experts.py`：4 个专家角色配置（选题编辑/研究员/结构师/撰稿人）+ 状态映射 + Prompt 加载
+- 新增 `prompts.py`：4 个专家的完整 System Prompt（每题约 4000-6000 字，含职责、输出格式、工作原则）
+- 重写 `service.py`：接入状态机引擎，实现 start_topic_confirm / confirm_state / regenerate / rollback 四大操作
+- 重写 `routes.py`：状态操作 API 从 1 个拆分为 4 个（/start /confirm /regenerate /rollback）
+- 新增 `.env`：MySQL + MiniMax 配置（API 地址修正为 api.minimaxi.com）
+
+### 修改文件
+```
+backend/app/plugins/wechat_writer/state_machine.py  (新建)
+backend/app/plugins/wechat_writer/experts.py         (新建)
+backend/app/plugins/wechat_writer/prompts.py         (新建)
+backend/app/plugins/wechat_writer/service.py         (重写)
+backend/app/plugins/wechat_writer/routes.py          (重写)
+backend/.env                                           (新建)
+```
+
+### 测试结果
+- ✅ **状态机基础**：7 状态正向流转、回退、暂停确认全部通过
+- ✅ **专家角色**：4 个专家配置完整，状态映射正确，System Prompt 已加载
+- ✅ **真实 MiniMax 调用**：选题编辑成功生成选题确认单（3500+ 字符）
+- ✅ **确认前进**：topic_confirm → research，confirmed_topic 正确保存
+- ✅ **回退**：research → topic_confirm，状态正确回退
+- ✅ **重新生成**：带用户建议调用 MiniMax，版本号从 1 递增到 2，feedback 正确存储
+- ✅ **消息记录**：每次 AI 调用都会记录 user/assistant 消息历史
+- ✅ **输出版本**：每次生成都会保存输出版本，支持历史回溯
+
+---
+
 ## [2026-07-21] M1·T2 — 插件注册 + 路由骨架
 
 ### 任务概述

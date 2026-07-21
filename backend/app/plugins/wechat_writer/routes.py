@@ -110,28 +110,79 @@ async def delete_session(
 
 # ========== 状态机操作 ==========
 
-@router.post("/sessions/{session_id}/state", summary="状态操作（确认/重生成/回退）")
-async def transition_state(
+@router.post("/sessions/{session_id}/start", summary="开始写作（从 idle 进入选题确认）")
+async def start_writing(
+    session_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    开始写作流程：从 idle 进入选题确认阶段，调用选题编辑专家分析主题
+
+    返回选题编辑的分析结果（选题确认单）
+    """
+    result = wechat_writer_service.start_topic_confirm(db, current_user.id, session_id)
+    return unified_response(data=result)
+
+
+@router.post("/sessions/{session_id}/confirm", summary="确认当前状态，进入下一步")
+async def confirm_current_state(
+    session_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    确认当前状态的输出，进入下一个状态
+
+    - 在 topic_confirm 状态：保存选题确认单为 confirmed_topic，进入 research
+    - 在 research 状态：确认资料卡片，进入 outline
+    - 在 outline 状态：确认大纲，进入 draft
+    - 在 draft 状态：确认初稿，进入 polish
+    - 在 polish 状态：确认润色稿，进入 done
+    """
+    result = wechat_writer_service.confirm_state(db, current_user.id, session_id)
+    return unified_response(data=result)
+
+
+@router.post("/sessions/{session_id}/regenerate", summary="重新生成当前步骤的输出")
+async def regenerate_current_step(
     session_id: int,
     request: StateTransitionRequest,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """
-    操作会话状态
+    重新生成当前步骤的输出
 
-    - **action**: confirm（确认前进）/ regenerate（重新生成）/ rollback（回退）/ switch_expert（切换专家）
-    - **target_state**: 回退时的目标状态
-    - **feedback**: 重新生成时的用户建议
-    - **expert_type**: 切换专家时的专家类型
+    - **feedback**: 用户填写的修改建议（可选，留空则 AI 自动换角度）
     """
-    # T3 实现完整逻辑，当前返回占位响应
-    return unified_response(data=StateResponse(
-        session_id=session_id,
-        current_state="idle",
-        previous_state=None,
-        message=f"状态操作 {request.action} 已接收（T3 实现）",
-    ).model_dump())
+    result = wechat_writer_service.regenerate(
+        db, current_user.id, session_id, feedback=request.feedback
+    )
+    return unified_response(data=result)
+
+
+@router.post("/sessions/{session_id}/rollback", summary="回退到指定状态")
+async def rollback_to_state(
+    session_id: int,
+    request: StateTransitionRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    回退到指定的前置状态
+
+    - **target_state**: 目标状态（必须是当前状态的前置状态）
+    - **feedback**: 回退原因（可选）
+    """
+    if not request.target_state:
+        raise ValueError("target_state 不能为空")
+    result = wechat_writer_service.rollback(
+        db, current_user.id, session_id,
+        target_state=request.target_state.value if hasattr(request.target_state, 'value') else request.target_state,
+        reason=request.feedback or "",
+    )
+    return unified_response(data=result)
 
 
 # ========== 资料卡片 ==========
