@@ -1,0 +1,59 @@
+# ============================================
+# 青萍小台 MVP - 后端 Systemd 服务配置
+# ============================================
+# 安装方式:
+#   sudo cp qingping-backend.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable qingping-backend
+#   sudo systemctl start qingping-backend
+#
+# 管理命令:
+#   sudo systemctl start/stop/restart/status qingping-backend
+#   sudo journalctl -u qingping-backend -f
+# ============================================
+
+[Unit]
+Description=Qingping MVP Backend Service
+After=network.target mysql.service
+Wants=mysql.service
+
+[Service]
+# 运行用户
+User=www-data
+Group=www-data
+
+# 工作目录
+WorkingDirectory=/opt/qingping-mvp/backend
+
+# 启动命令
+ExecStart=/opt/qingping-mvp/backend/venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8081 --workers 2
+
+# 环境变量文件
+EnvironmentFile=/opt/qingping-mvp/.env
+
+# 重启策略
+Restart=on-failure
+RestartSec=5s
+RestartPreventExitStatus=255
+
+# 资源限制
+LimitNOFILE=65535
+LimitNPROC=4096
+
+# 安全设置
+NoNewPrivileges=true
+PrivateTmp=true
+
+# 标准输出和错误输出到日志
+StandardOutput=journal
+StandardError=journal
+
+# 日志标识
+SyslogIdentifier=qingping-backend
+
+# 超时设置
+TimeoutStartSec=30
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target
