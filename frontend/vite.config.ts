@@ -24,7 +24,7 @@ export default defineConfig(({ mode }) => {
       // 代理配置（可选，用于开发环境 API 代理）
       proxy: {
         '/api': {
-          target: env.VITE_API_BASE_URL || 'http://localhost:8081',
+          target: env.VITE_API_BASE_URL || 'http://localhost:8080',
           changeOrigin: true,
           rewrite: (path) => path.replace(/^\/api/, '/api'),
         },
