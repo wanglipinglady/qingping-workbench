@@ -49,8 +49,10 @@ class Settings(BaseSettings):
     # MiniMax API 密钥
     MINIMAX_API_KEY: str = Field(default="", description="MiniMax API 密钥")
     # MiniMax API 基础地址
+    # 新版 API: https://api.minimaxi.com/v1  (API Key 以 sk-cp- 开头)
+    # 旧版 API: https://api.minimax.chat/v1  (API Key 以 ab- 开头)
     MINIMAX_BASE_URL: str = Field(
-        default="https://api.minimax.chat/v1", description="MiniMax API 基础 URL"
+        default="https://api.minimaxi.com/v1", description="MiniMax API 基础 URL"
     )
     # 对话模型名称
     MINIMAX_CHAT_MODEL: str = Field(

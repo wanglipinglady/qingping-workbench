@@ -254,15 +254,30 @@ class MiniMaxClient:
         result = self.chat(messages, **kwargs)
         # 解析回复内容
         try:
+            content = ""
             if "choices" in result and len(result["choices"]) > 0:
                 choice = result["choices"][0]
                 if "message" in choice:
-                    return choice["message"].get("content", "")
+                    content = choice["message"].get("content", "")
                 elif "text" in choice:
-                    return choice["text"]
-            return ""
+                    content = choice["text"]
+            # 过滤掉 MiniMax M2.7/M3 模型的 <think> 推理过程标签
+            content = self._strip_think_tags(content)
+            return content
         except Exception:
             return ""
+
+    @staticmethod
+    def _strip_think_tags(text: str) -> str:
+        """
+        移除 MiniMax M2.7/M3 模型输出的 <think>...</think> 推理过程标签
+        """
+        if not text:
+            return text
+        import re
+        # 移除 <think> 及其内容（包括跨行的情况）
+        result = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL)
+        return result.strip()
 
 
 # 全局 MiniMax 客户端实例
