@@ -214,6 +214,73 @@ export interface PhaseProgress {
   label: string;
 }
 
+// ==================== 微信公众号写作助手相关类型 ====================
+
+/** 写作状态 */
+export type WriterState = 'idle' | 'topic_confirm' | 'research' | 'outline' | 'draft' | 'polish' | 'done';
+
+/** 写作会话 */
+export interface WriterSession {
+  id: number;
+  user_id: number;
+  title: string;
+  topic: string;
+  confirmed_topic?: string;
+  current_state: WriterState;
+  iteration_count: number;
+  status: 'active' | 'completed' | 'archived';
+  total_tokens: number;
+  obsidian_sync_time?: string;
+  material_count?: number;
+  message_count?: number;
+  output_count?: number;
+  created_at: string;
+  updated_at: string;
+}
+
+/** 写作资料卡片 */
+export interface WriterMaterial {
+  id: number;
+  session_id: number;
+  source_type: 'obsidian' | 'knowledge_base' | 'web';
+  title: string;
+  url?: string;
+  core_idea?: string;
+  useful_snippets?: string;
+  credibility_score: number;
+  suggested_usage?: string;
+  is_useful: boolean;
+  tags?: string;
+  created_at: string;
+}
+
+/** 写作输出 */
+export interface WriterOutput {
+  id: number;
+  session_id: number;
+  step: 'topic' | 'research' | 'outline' | 'draft' | 'polish';
+  content_type: 'analysis' | 'materials' | 'outline' | 'draft' | 'final';
+  content: string;
+  version: number;
+  is_confirmed: boolean;
+  feedback?: string;
+  created_at: string;
+}
+
+/** 写作消息 */
+export interface WriterMessage {
+  id: number;
+  session_id: number;
+  role: 'user' | 'assistant' | 'system';
+  expert_type?: string;
+  state_label?: string;
+  iteration: number;
+  content: string;
+  token_usage: number;
+  is_streaming?: boolean;
+  created_at: string;
+}
+
 // ==================== 统计相关类型 ====================
 
 /** 首页统计数据 */

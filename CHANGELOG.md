@@ -4,6 +4,38 @@
 
 ---
 
+## [2026-07-21] M1·T4 — 前端页面框架
+
+### 任务概述
+完成微信公众号写作助手的前端页面框架，包括 API 层、状态管理（Zustand Store）、主页面组件，以及路由和菜单注册。
+
+### 变更内容
+- 新增 `api/wechatWriter.ts`：12 个 API 接口封装（会话 CRUD + 状态操作 + 资料/输出）
+- 新增 `store/useWeChatWriterStore.ts`：Zustand 状态管理（会话、输出、加载状态、12 个 action）
+- 新增 `pages/WeChatWriter.tsx`：主页面组件（左侧会话列表 + 顶部进度条 + 中间输出区 + 底部操作区 + 3 个弹窗）
+- 更新 `api/types.ts`：新增 WriterSession/WriterMaterial/WriterOutput/WriterMessage 4 个类型
+- 更新 `App.tsx`：注册 `/wechat-writer` 路由
+- 更新 `Sidebar.tsx`：添加「公众号写作」菜单项
+
+### 修改文件
+```
+frontend/src/api/wechatWriter.ts            (新建)
+frontend/src/store/useWeChatWriterStore.ts  (新建)
+frontend/src/pages/WeChatWriter.tsx          (新建)
+frontend/src/api/types.ts                     (更新 +4 类型)
+frontend/src/App.tsx                          (更新 +1 路由)
+frontend/src/components/Layout/Sidebar.tsx   (更新 +1 菜单)
+```
+
+### 测试结果
+- ✅ **Vite 构建**：1480 modules，构建成功无报错
+- ✅ **类型安全**：所有新增 TypeScript 类型正确
+- ✅ **页面结构**：左侧会话列表、顶部进度条、中间输出区、底部操作区完整
+- ✅ **交互弹窗**：新建写作/重新生成/回退 3 个弹窗
+- ✅ **路由菜单**：侧边栏菜单高亮、路由跳转正常
+
+---
+
 ## [2026-07-21] M1·T3 — 状态机引擎 + 选题编辑角色
 
 ### 任务概述

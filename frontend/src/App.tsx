@@ -11,6 +11,7 @@ import Login from '@/pages/Login';
 import Home from '@/pages/Home';
 import KnowledgeBase from '@/pages/KnowledgeBase';
 import TechExperts from '@/pages/TechExperts';
+import WeChatWriter from '@/pages/WeChatWriter';
 import { useUserStore } from '@/store/useUserStore';
 import Loading from '@/components/Common/Loading';
 
@@ -19,6 +20,7 @@ const pageTitles: Record<string, string> = {
   '/home': '工作台',
   '/knowledge': '知识库',
   '/tech-experts': '技术专家组',
+  '/wechat-writer': '公众号写作',
 };
 
 /**
@@ -88,6 +90,7 @@ function MainLayout() {
             <Route path="/home" element={<Home />} />
             <Route path="/knowledge" element={<KnowledgeBase />} />
             <Route path="/tech-experts" element={<TechExperts />} />
+            <Route path="/wechat-writer" element={<WeChatWriter />} />
             <Route path="*" element={<Navigate to="/home" replace />} />
           </Routes>
         </main>
