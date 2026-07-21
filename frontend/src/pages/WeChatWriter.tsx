@@ -367,7 +367,7 @@ export default function WeChatWriter() {
 
       {/* 新建会话弹窗 */}
       <Modal
-        open={showNewSessionModal}
+        visible={showNewSessionModal}
         onClose={() => setShowNewSessionModal(false)}
         title="新建写作"
       >
@@ -411,7 +411,7 @@ export default function WeChatWriter() {
 
       {/* 重新生成弹窗 */}
       <Modal
-        open={showRegenerateModal}
+        visible={showRegenerateModal}
         onClose={() => setShowRegenerateModal(false)}
         title="重新生成"
       >
@@ -443,7 +443,7 @@ export default function WeChatWriter() {
 
       {/* 回退弹窗 */}
       <Modal
-        open={showRollbackModal}
+        visible={showRollbackModal}
         onClose={() => setShowRollbackModal(false)}
         title="回退到上一阶段"
       >
