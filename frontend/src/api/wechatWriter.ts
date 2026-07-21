@@ -2,7 +2,7 @@
  * 微信公众号写作助手相关 API
  */
 
-import { get, post, put, del } from './index';
+import { get, post, put, del, aiPost } from './index';
 import type {
   WriterSession,
   WriterOutput,
@@ -76,7 +76,7 @@ export function deleteWriterSession(sessionId: number): Promise<void> {
 // ==================== 状态操作 ====================
 
 /**
- * 开始写作（从 idle 进入选题确认）
+ * 开始写作（从 idle 进入选题确认）- AI 长超时
  */
 export function startWriting(sessionId: number): Promise<{
   from_state: string;
@@ -84,22 +84,22 @@ export function startWriting(sessionId: number): Promise<{
   expert: string;
   response: string;
 }> {
-  return post(`/wechat-writer/sessions/${sessionId}/start`);
+  return aiPost(`/wechat-writer/sessions/${sessionId}/start`);
 }
 
 /**
- * 确认当前状态，进入下一步
+ * 确认当前状态，进入下一步 - AI 长超时
  */
 export function confirmState(sessionId: number): Promise<{
   from_state: string;
   to_state: string;
   message: string;
 }> {
-  return post(`/wechat-writer/sessions/${sessionId}/confirm`);
+  return aiPost(`/wechat-writer/sessions/${sessionId}/confirm`);
 }
 
 /**
- * 重新生成当前步骤的输出
+ * 重新生成当前步骤的输出 - AI 长超时
  */
 export function regenerateOutput(
   sessionId: number,
@@ -111,7 +111,7 @@ export function regenerateOutput(
   feedback: string | null;
   response: string;
 }> {
-  return post(`/wechat-writer/sessions/${sessionId}/regenerate`, {
+  return aiPost(`/wechat-writer/sessions/${sessionId}/regenerate`, {
     action: 'regenerate',
     feedback,
   });
@@ -130,7 +130,7 @@ export function rollbackToState(
   reason: string;
   message: string;
 }> {
-  return post(`/wechat-writer/sessions/${sessionId}/rollback`, {
+  return aiPost(`/wechat-writer/sessions/${sessionId}/rollback`, {
     action: 'rollback',
     target_state: targetState,
     feedback,

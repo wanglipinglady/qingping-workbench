@@ -40,6 +40,9 @@ class MiniMaxClient:
         self.embedding_model = embedding_model or settings.MINIMAX_EMBEDDING_MODEL
         self.max_retries = max_retries
         self.retry_delay = retry_delay
+        # 请求超时：对话生成给 180 秒，Embedding 等轻量请求给 60 秒
+        self.chat_timeout = 180
+        self.generic_timeout = 60
 
         # 通用请求头
         self._headers = {
@@ -51,6 +54,7 @@ class MiniMaxClient:
         self,
         method: str,
         url: str,
+        timeout: Optional[int] = None,
         **kwargs,
     ) -> requests.Response:
         """
@@ -59,6 +63,7 @@ class MiniMaxClient:
         Args:
             method: HTTP 方法
             url: 请求 URL
+            timeout: 超时时间（秒），默认使用 generic_timeout
             **kwargs: 其他请求参数
 
         Returns:
@@ -67,10 +72,11 @@ class MiniMaxClient:
         Raises:
             Exception: 重试后仍然失败
         """
+        request_timeout = timeout if timeout is not None else self.generic_timeout
         last_exception = None
         for attempt in range(self.max_retries):
             try:
-                response = requests.request(method, url, timeout=60, **kwargs)
+                response = requests.request(method, url, timeout=request_timeout, **kwargs)
                 response.raise_for_status()
                 return response
             except requests.RequestException as e:
@@ -121,7 +127,7 @@ class MiniMaxClient:
 
         try:
             response = self._request_with_retry(
-                "POST", url, headers=self._headers, json=payload
+                "POST", url, headers=self._headers, json=payload, timeout=self.chat_timeout
             )
             return response.json()
         except requests.RequestException as e:
@@ -170,7 +176,7 @@ class MiniMaxClient:
                 headers=self._headers,
                 json=payload,
                 stream=True,
-                timeout=60,
+                timeout=self.chat_timeout,
             )
             response.raise_for_status()
 
@@ -270,13 +276,16 @@ class MiniMaxClient:
     @staticmethod
     def _strip_think_tags(text: str) -> str:
         """
-        移除 MiniMax M2.7/M3 模型输出的 <think>...</think> 推理过程标签
+        移除 MiniMax M2.7/M3 模型输出的推理过程标签
+        兼容两种格式：<think>...</think> 和 <RichMediaReference>...superscript:
         """
         if not text:
             return text
         import re
-        # 移除 <think> 及其内容（包括跨行的情况）
+        # 移除标准 <think> 标签
         result = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL)
+        # 移除特殊字符格式的推理标签（MiniMax 部分模型使用）
+        result = re.sub(r'<RichMediaReference>.*?superscript:', '', result, flags=re.DOTALL)
         return result.strip()
 
 

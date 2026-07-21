@@ -27,6 +27,9 @@ export default defineConfig(({ mode }) => {
           target: env.VITE_API_BASE_URL || 'http://localhost:8080',
           changeOrigin: true,
           rewrite: (path) => path.replace(/^\/api/, '/api'),
+          // 代理超时：AI 请求可能需要较长时间，设置为 180 秒
+          timeout: 180000,
+          proxyTimeout: 180000,
         },
       },
     },

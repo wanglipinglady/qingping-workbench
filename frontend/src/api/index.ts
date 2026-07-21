@@ -12,11 +12,76 @@ const BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
 // 创建 Axios 实例
 const request: AxiosInstance = axios.create({
   baseURL: BASE_URL,
-  timeout: 30000, // 30秒超时
+  timeout: 30000, // 普通请求 30秒超时
   headers: {
     'Content-Type': 'application/json',
   },
 });
+
+// AI 相关请求的长超时实例（选题分析、写作等需要调用大模型）
+const aiRequest: AxiosInstance = axios.create({
+  baseURL: BASE_URL,
+  timeout: 180000, // AI 请求 180秒超时（大模型生成可能较慢）
+  headers: {
+    'Content-Type': 'application/json',
+  },
+});
+
+// 给 AI 请求也加上同样的拦截器
+aiRequest.interceptors.request.use(
+  (config: InternalAxiosRequestConfig) => {
+    const token = storage.getToken();
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+    return config;
+  },
+  (error) => Promise.reject(error),
+);
+aiRequest.interceptors.response.use(
+  (response: AxiosResponse) => {
+    const data = response.data;
+    if (data && typeof data === 'object' && 'code' in data) {
+      if (data.code === 200 || data.code === 0) {
+        return data.data;
+      }
+      const error = new Error(data.message || '请求失败') as Error & { code?: number };
+      error.code = data.code;
+      return Promise.reject(error);
+    }
+    return data;
+  },
+  (error) => {
+    const { response } = error;
+    if (response) {
+      const { status, data } = response;
+      if (status === 401) {
+        storage.clearToken();
+        storage.clearUser();
+        if (window.location.pathname !== '/login') {
+          window.location.href = `/login?redirect=${encodeURIComponent(window.location.pathname)}`;
+        }
+      }
+      const err = new Error(
+        data?.message || data?.detail || `请求失败 (${status})`
+      ) as Error & { status?: number; data?: unknown };
+      err.status = status;
+      err.data = data;
+      return Promise.reject(err);
+    }
+    if (error.message === 'Network Error') {
+      const err = new Error('网络连接失败，请检查网络设置') as Error & { status?: number };
+      err.status = 0;
+      return Promise.reject(err);
+    }
+    if (error.code === 'ECONNABORTED') {
+      const err = new Error('AI 生成需要较长时间，请求超时。请检查网络或稍后重试') as Error & { status?: number };
+      err.status = 408;
+      return Promise.reject(err);
+    }
+    return Promise.reject(error);
+  },
+);
 
 // 请求拦截器
 request.interceptors.request.use(
@@ -217,4 +282,52 @@ export function upload<T = unknown>(
   });
 }
 
+// ==================== AI 长超时请求 ====================
+// 用于选题分析、资料搜集、大纲设计、写作等需要调用大模型的接口
+
+/** AI 长超时 GET 请求 */
+export function aiGet<T = unknown>(
+  url: string,
+  params?: Record<string, unknown>,
+  config?: AxiosRequestConfig
+): Promise<T> {
+  return aiRequest.get(url, { params, ...config });
+}
+
+/** AI 长超时 POST 请求 */
+export function aiPost<T = unknown>(
+  url: string,
+  data?: unknown,
+  config?: AxiosRequestConfig
+): Promise<T> {
+  return aiRequest.post(url, data, config);
+}
+
+/** AI 长超时 PUT 请求 */
+export function aiPut<T = unknown>(
+  url: string,
+  data?: unknown,
+  config?: AxiosRequestConfig
+): Promise<T> {
+  return aiRequest.put(url, data, config);
+}
+
+/** AI 长超时 PATCH 请求 */
+export function aiPatch<T = unknown>(
+  url: string,
+  data?: unknown,
+  config?: AxiosRequestConfig
+): Promise<T> {
+  return aiRequest.patch(url, data, config);
+}
+
+/** AI 长超时 DELETE 请求 */
+export function aiDel<T = unknown>(
+  url: string,
+  config?: AxiosRequestConfig
+): Promise<T> {
+  return aiRequest.delete(url, config);
+}
+
+export { aiRequest };
 export default request;
