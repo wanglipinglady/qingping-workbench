@@ -4,6 +4,32 @@
 
 ---
 
+## [2026-07-21] M1·T2 — 插件注册 + 路由骨架
+
+### 任务概述
+完成微信公众号写作助手的插件注册、路由骨架、Schema 定义和服务层骨架。
+
+### 变更内容
+- 新增 `plugin.py`：插件注册，挂载 1 个菜单项「公众号写作」
+- 新增 `schemas.py`：20+ 个 Pydantic Schema（会话/状态/资料/输出的请求响应）
+- 新增 `routes.py`：10 个 API 端点（会话 CRUD + 状态操作 + 资料卡片 + 输出版本 + SSE 占位）
+- 新增 `service.py`：服务层骨架（会话管理 + 状态机占位 + 资料/输出接口）
+
+### 修改文件
+```
+backend/app/plugins/wechat_writer/plugin.py      (新建)
+backend/app/plugins/wechat_writer/schemas.py     (新建)
+backend/app/plugins/wechat_writer/routes.py      (新建)
+backend/app/plugins/wechat_writer/service.py     (新建)
+```
+
+### 测试结果
+- ✅ **自动化测试**：插件注册成功（4 个插件），10 个 API 端点全部正常响应
+- ✅ **会话 CRUD**：创建/列表/详情/更新/删除 全部通过
+- ✅ **接口响应**：资料卡片、输出版本、状态操作接口全部正常
+
+---
+
 ## [2026-07-21] M1·T1 — 数据模型 + 数据库迁移
 
 ### 任务概述
