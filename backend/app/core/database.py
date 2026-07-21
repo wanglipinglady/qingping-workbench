@@ -64,5 +64,6 @@ def init_db() -> None:
     from app.plugins.user import models as user_models  # noqa: F401
     from app.plugins.knowledge_base import models as kb_models  # noqa: F401
     from app.plugins.tech_experts import models as tech_models  # noqa: F401
+    from app.plugins.wechat_writer import models as wechat_models  # noqa: F401
 
     Base.metadata.create_all(bind=engine)

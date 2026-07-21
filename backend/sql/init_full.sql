@@ -18,11 +18,11 @@ SET FOREIGN_KEY_CHECKS = 0;
 -- ============================================
 -- 1. 创建数据库
 -- ============================================
-CREATE DATABASE IF NOT EXISTS `qingping`
+CREATE DATABASE IF NOT EXISTS `dream`
   DEFAULT CHARACTER SET utf8mb4
   DEFAULT COLLATE utf8mb4_unicode_ci;
 
-USE `qingping`;
+USE `dream`;
 
 -- ============================================
 -- 2. 用户表 (users)
