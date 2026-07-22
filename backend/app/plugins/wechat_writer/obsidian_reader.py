@@ -518,14 +518,15 @@ class ObsidianReader:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _extract_complete_sentence(text: str, max_len: int = 500) -> str:
+    def _extract_complete_sentence(text: str, max_len: int = 600) -> str:
         """
         从文本中提取从完整句子开始的片段
 
         策略：
-        1. 如果文本开头就是句子中间（不是换行/标题/标点后），回溯到最近的句子开头
-        2. 句子开头包括：换行、标题标记（#）、句号/问号/感叹号后、段首
-        3. 返回的内容不超过 max_len 字符
+        1. 截断到 max_len 字符
+        2. 找到所有句子边界（句号、问号、感叹号、冒号、换行、段首）
+        3. 从最接近开头的句子边界开始返回
+        4. 如果前 30 字符内没有句子边界，说明本身就是完整句子，原样返回
 
         Args:
             text: 原始文本片段
@@ -540,41 +541,35 @@ class ObsidianReader:
         # 先截断到最大长度
         truncated = text[:max_len] if len(text) > max_len else text
 
-        # 定义句子开头的模式（向前查找）
-        # 匹配: 段首、标题行、句号/问号/感叹号/冒号后、换行后
-        sentence_start_pattern = r'(?:^|\n|\r|。|！|？|\.|!|\?|：|:)\s*'
-
         import re
-        # 找到所有句子开头的位置
-        positions = [0]  # 默认从开头开始
-        for match in re.finditer(sentence_start_pattern, truncated):
-            end_pos = match.end()
-            if end_pos < len(truncated) - 1:  # 至少还有内容
-                positions.append(end_pos)
+        # 匹配句子结束标记（后面可以跟空白字符）
+        # 包括：句号、问号、感叹号、冒号、换行
+        sentence_end_pattern = r'[。！？.!?：:；;]\s*|\n\s*'
 
-        # 如果开头就是不完整的（前面有重叠字符导致截断），找到最近的句子开头
-        # 检查文本开头是否像一个完整句子的开头
-        first_chars = truncated[:20]
-        looks_like_incomplete = (
-            not first_chars.strip() == first_chars  # 不以空白开头
-            and not first_chars.startswith('#')  # 不是标题
-            and not first_chars.startswith('\n')  # 不是换行
-            and len(positions) > 1  # 有其他可选的句子开头
-        )
+        # 在文本前 200 字符内找所有句子结束位置
+        search_range = truncated[:200]
+        end_matches = list(re.finditer(sentence_end_pattern, search_range))
 
-        if looks_like_incomplete:
-            # 找到最接近开头的句子开头位置
-            # 取第二个位置（第一个是位置0）
-            start_pos = positions[1] if len(positions) > 1 else 0
-            result = truncated[start_pos:].lstrip()
-        else:
-            result = truncated.lstrip()
+        if not end_matches:
+            # 前 200 字符内没有句子边界，认为本身就是完整开头
+            return truncated.lstrip()
 
-        # 如果结果太短，尝试返回更多
-        if len(result) < 50 and len(text) > len(result):
-            result = text[:max_len].lstrip()
+        # 找到第一个句子结束位置，下一个字符就是新句子的开始
+        first_end = end_matches[0]
+        sentence_start = first_end.end()
 
-        return result
+        # 关键判断：如果第一个句子结束标记在文本很前面（< 20 字符），
+        # 且不是以标题/换行开头，说明开头是被截断的不完整句子
+        # 例如 "体论的价值：把分散数据..." → "：" 在位置 5，开头被截断了
+        # 而完整句子如 "没有本体论，AI 只是一个更贵的查询工具。" 通常超过 20 字符
+        if sentence_start < 20 and not truncated.lstrip().startswith('#'):
+            # 开头被截断，从句子边界后开始
+            result = truncated[sentence_start:].lstrip()
+            if len(result) >= 15:
+                return result
+
+        # 否则认为开头就是完整句子，原样返回
+        return truncated.lstrip()
 
     @staticmethod
     def _diversified_rerank(results: List[Dict[str, Any]], top_k: int) -> List[Dict[str, Any]]:
