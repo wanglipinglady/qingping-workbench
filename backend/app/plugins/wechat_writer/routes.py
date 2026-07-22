@@ -25,6 +25,10 @@ from app.plugins.wechat_writer.schemas import (
     MaterialCreateRequest,
     MaterialUpdateRequest,
     MaterialParseRequest,
+    TemplateResponse,
+    TemplateCreateRequest,
+    TemplateUpdateRequest,
+    TemplateApplyRequest,
 )
 from app.plugins.wechat_writer.service import wechat_writer_service
 from app.plugins.wechat_writer.obsidian_reader import obsidian_reader
@@ -396,6 +400,108 @@ async def stream_session_post(
             yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
 
     return StreamingResponse(_sse_gen(), media_type="text/event-stream")
+
+
+# ========== 写作模板 ==========
+
+@router.get("/templates", summary="获取写作模板列表")
+async def list_templates(
+    category: Optional[str] = Query(None, description="按分类筛选"),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """获取可用的写作模板（系统预设 + 自己的 + 公开的）"""
+    items = wechat_writer_service.list_templates(db, current_user.id, category)
+    return unified_response(data=[TemplateResponse.model_validate(t).model_dump() for t in items])
+
+
+@router.get("/templates/{template_id}", summary="获取模板详情")
+async def get_template(
+    template_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """获取单个模板的详细信息"""
+    template = wechat_writer_service.get_template(db, current_user.id, template_id)
+    if not template:
+        from app.core.exceptions import BusinessException
+        raise BusinessException("模板不存在或无权限查看")
+    return unified_response(data=TemplateResponse.model_validate(template).model_dump())
+
+
+@router.post("/templates", summary="创建自定义模板")
+async def create_template(
+    request: TemplateCreateRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """创建一个新的写作模板"""
+    template = wechat_writer_service.create_template(
+        db, current_user.id,
+        name=request.name,
+        description=request.description,
+        category=request.category,
+        icon=request.icon,
+        topic_prompt=request.topic_prompt,
+        research_prompt=request.research_prompt,
+        outline_prompt=request.outline_prompt,
+        writer_prompt=request.writer_prompt,
+        suggested_topics=request.suggested_topics,
+        default_style=request.default_style,
+        default_audience=request.default_audience,
+        is_public=request.is_public,
+    )
+    return unified_response(data=TemplateResponse.model_validate(template).model_dump())
+
+
+@router.put("/templates/{template_id}", summary="更新模板")
+async def update_template(
+    template_id: int,
+    request: TemplateUpdateRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """更新自己的模板（名称、描述、Prompt、分类等）"""
+    template = wechat_writer_service.update_template(
+        db, current_user.id, template_id,
+        **request.model_dump(exclude_unset=True),
+    )
+    return unified_response(data=TemplateResponse.model_validate(template).model_dump())
+
+
+@router.delete("/templates/{template_id}", summary="删除模板")
+async def delete_template(
+    template_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """删除自己的自定义模板"""
+    wechat_writer_service.delete_template(db, current_user.id, template_id)
+    return unified_response(message="删除成功")
+
+
+@router.post("/templates/apply", summary="从模板创建写作会话")
+async def apply_template(
+    request: TemplateApplyRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    从模板创建一个新的写作会话
+
+    - 自动增加模板使用次数
+    - 可选：用户自定义主题覆盖模板推荐
+    """
+    session = wechat_writer_service.apply_template(
+        db, current_user.id,
+        template_id=request.template_id,
+        topic=request.topic,
+    )
+    from app.plugins.wechat_writer.schemas import SessionResponse
+    return unified_response(
+        data=SessionResponse.model_validate(session).model_dump(),
+        message="已从模板创建写作会话"
+    )
 
 
 # ========== Obsidian 同步 ==========

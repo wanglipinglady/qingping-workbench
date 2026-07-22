@@ -148,6 +148,73 @@ class MaterialParseRequest(BaseModel):
     ai_output: str
 
 
+# ========== 写作模板相关 ==========
+
+class TemplateResponse(BaseModel):
+    """写作模板响应"""
+    id: int
+    name: str
+    description: Optional[str] = None
+    category: str
+    icon: Optional[str] = None
+    topic_prompt: Optional[str] = None
+    research_prompt: Optional[str] = None
+    outline_prompt: Optional[str] = None
+    writer_prompt: Optional[str] = None
+    suggested_topics: Optional[str] = None
+    default_style: Optional[str] = None
+    default_audience: Optional[str] = None
+    user_id: Optional[int] = None
+    is_public: bool = False
+    is_system: bool = False
+    use_count: int = 0
+    sort_order: int = 0
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class TemplateCreateRequest(BaseModel):
+    """创建写作模板请求"""
+    name: str
+    description: Optional[str] = None
+    category: str = "custom"
+    icon: Optional[str] = "📝"
+    topic_prompt: Optional[str] = None
+    research_prompt: Optional[str] = None
+    outline_prompt: Optional[str] = None
+    writer_prompt: Optional[str] = None
+    suggested_topics: Optional[str] = None
+    default_style: Optional[str] = None
+    default_audience: Optional[str] = None
+    is_public: bool = False
+
+
+class TemplateUpdateRequest(BaseModel):
+    """更新写作模板请求"""
+    name: Optional[str] = None
+    description: Optional[str] = None
+    category: Optional[str] = None
+    icon: Optional[str] = None
+    topic_prompt: Optional[str] = None
+    research_prompt: Optional[str] = None
+    outline_prompt: Optional[str] = None
+    writer_prompt: Optional[str] = None
+    suggested_topics: Optional[str] = None
+    default_style: Optional[str] = None
+    default_audience: Optional[str] = None
+    is_public: Optional[bool] = None
+    sort_order: Optional[int] = None
+
+
+class TemplateApplyRequest(BaseModel):
+    """从模板创建会话请求"""
+    template_id: int
+    topic: Optional[str] = None  # 可选：用户自定义主题，覆盖模板推荐
+
+
 # ========== 输出版本相关 ==========
 
 class OutputResponse(BaseModel):

@@ -1,6 +1,6 @@
 """
 微信公众号写作助手 - 数据模型
-定义 4 张核心表：会话、资料卡片、消息记录、输出版本
+定义 5 张核心表：会话、资料卡片、消息记录、输出版本、写作模板
 """
 from datetime import datetime
 
@@ -152,3 +152,40 @@ class WeChatWriterOutput(Base):
 
     # 关联
     session = relationship("WeChatWriterSession", back_populates="outputs")
+
+
+class WeChatWriterTemplate(Base):
+    """写作模板表
+    存储预设和用户自定义的写作模板
+    """
+
+    __tablename__ = "wechat_writer_templates"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True, comment="模板ID")
+    name = Column(String(200), nullable=False, comment="模板名称")
+    description = Column(Text, nullable=True, comment="模板描述")
+    category = Column(
+        String(50), nullable=False, default="custom", index=True,
+        comment="模板分类:干货/情感/热点/科普/教程/测评/复盘/其他/custom"
+    )
+    icon = Column(String(50), nullable=True, default="📝", comment="模板图标（emoji）")
+
+    # 模板配置
+    topic_prompt = Column(Text, nullable=True, comment="选题阶段自定义 Prompt")
+    research_prompt = Column(Text, nullable=True, comment="研究员自定义 Prompt")
+    outline_prompt = Column(Text, nullable=True, comment="结构师自定义 Prompt")
+    writer_prompt = Column(Text, nullable=True, comment="撰稿人自定义 Prompt")
+
+    # 预设内容
+    suggested_topics = Column(Text, nullable=True, comment="推荐主题（JSON 数组字符串）")
+    default_style = Column(String(200), nullable=True, comment="默认文章风格")
+    default_audience = Column(String(200), nullable=True, comment="默认目标读者")
+
+    # 元数据
+    user_id = Column(Integer, nullable=True, index=True, comment="创建者用户ID（NULL=系统预设）")
+    is_public = Column(SmallInteger, nullable=False, default=0, comment="是否公开（1=公开，0=私有）")
+    is_system = Column(SmallInteger, nullable=False, default=0, index=True, comment="是否系统预设（1=是，0=否）")
+    use_count = Column(Integer, nullable=False, default=0, index=True, comment="使用次数")
+    sort_order = Column(Integer, nullable=False, default=0, index=True, comment="排序（越小越靠前）")
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True, comment="创建时间")
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False, comment="更新时间")

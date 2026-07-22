@@ -1,6 +1,6 @@
 """
 微信公众号写作助手 - 服务层
-提供会话、状态机、资料卡片的业务逻辑
+提供会话、状态机、资料卡片、写作模板的业务逻辑
 """
 from typing import Optional, List, Tuple
 from datetime import datetime
@@ -14,6 +14,8 @@ from app.plugins.wechat_writer.models import (
     WeChatWriterMaterial,
     WeChatWriterMessage,
     WeChatWriterOutput,
+    WeChatWriterTemplate,
+    STATE_LABELS,
 )
 from app.plugins.wechat_writer.schemas import (
     SessionCreateRequest,
@@ -770,6 +772,150 @@ class WeChatWriterService:
         if step:
             query = query.filter(WeChatWriterOutput.step == step)
         return query.order_by(WeChatWriterOutput.step, WeChatWriterOutput.version).all()
+
+    # ========== 写作模板 ==========
+
+    def list_templates(
+        self, db: Session, user_id: int,
+        category: Optional[str] = None,
+        include_system: bool = True,
+    ) -> List[WeChatWriterTemplate]:
+        """获取模板列表（系统预设 + 当前用户的私有模板）"""
+        query = db.query(WeChatWriterTemplate).filter(
+            (WeChatWriterTemplate.user_id == user_id) |
+            (WeChatWriterTemplate.is_system == 1) |
+            (WeChatWriterTemplate.is_public == 1)
+        )
+        if category:
+            query = query.filter(WeChatWriterTemplate.category == category)
+        return query.order_by(
+            WeChatWriterTemplate.sort_order,
+            WeChatWriterTemplate.use_count.desc(),
+            WeChatWriterTemplate.created_at.desc(),
+        ).all()
+
+    def get_template(self, db: Session, user_id: int, template_id: int) -> Optional[WeChatWriterTemplate]:
+        """获取单个模板（带权限校验）"""
+        template = db.query(WeChatWriterTemplate).filter(
+            WeChatWriterTemplate.id == template_id
+        ).first()
+        if not template:
+            return None
+        # 权限校验：系统模板、公开模板、自己的模板 可以访问
+        if template.is_system or template.is_public or template.user_id == user_id:
+            return template
+        return None
+
+    def create_template(
+        self, db: Session, user_id: int,
+        name: str, description: Optional[str] = None,
+        category: str = "custom", icon: Optional[str] = "📝",
+        topic_prompt: Optional[str] = None,
+        research_prompt: Optional[str] = None,
+        outline_prompt: Optional[str] = None,
+        writer_prompt: Optional[str] = None,
+        suggested_topics: Optional[str] = None,
+        default_style: Optional[str] = None,
+        default_audience: Optional[str] = None,
+        is_public: bool = False,
+    ) -> WeChatWriterTemplate:
+        """创建自定义模板"""
+        template = WeChatWriterTemplate(
+            name=name,
+            description=description,
+            category=category,
+            icon=icon or "📝",
+            topic_prompt=topic_prompt,
+            research_prompt=research_prompt,
+            outline_prompt=outline_prompt,
+            writer_prompt=writer_prompt,
+            suggested_topics=suggested_topics,
+            default_style=default_style,
+            default_audience=default_audience,
+            user_id=user_id,
+            is_public=1 if is_public else 0,
+            is_system=0,
+        )
+        db.add(template)
+        db.commit()
+        db.refresh(template)
+        print(f"[Template] 创建模板: id={template.id}, name={name}")
+        return template
+
+    def update_template(
+        self, db: Session, user_id: int, template_id: int,
+        **kwargs,
+    ) -> WeChatWriterTemplate:
+        """更新模板（只能更新自己的模板）"""
+        template = db.query(WeChatWriterTemplate).filter(
+            WeChatWriterTemplate.id == template_id,
+            WeChatWriterTemplate.user_id == user_id,
+        ).first()
+        if not template:
+            raise BusinessException("模板不存在或无权限修改")
+
+        for key, value in kwargs.items():
+            if value is not None and hasattr(template, key):
+                if key == "is_public":
+                    setattr(template, key, 1 if value else 0)
+                else:
+                    setattr(template, key, value)
+
+        db.commit()
+        db.refresh(template)
+        return template
+
+    def delete_template(self, db: Session, user_id: int, template_id: int) -> None:
+        """删除模板（只能删除自己的模板）"""
+        template = db.query(WeChatWriterTemplate).filter(
+            WeChatWriterTemplate.id == template_id,
+            WeChatWriterTemplate.user_id == user_id,
+        ).first()
+        if not template:
+            raise BusinessException("模板不存在或无权限删除")
+        db.delete(template)
+        db.commit()
+        print(f"[Template] 删除模板: id={template_id}")
+
+    def apply_template(
+        self, db: Session, user_id: int,
+        template_id: int, topic: Optional[str] = None,
+    ) -> WeChatWriterSession:
+        """
+        从模板创建会话
+
+        - 自动增加模板使用次数
+        - 如果模板有推荐主题且用户未指定，使用推荐主题
+        - 后续 Prompt 注入逻辑在状态机中处理
+        """
+        template = self.get_template(db, user_id, template_id)
+        if not template:
+            raise BusinessException("模板不存在或无权限使用")
+
+        # 确定主题
+        final_topic = topic
+        if not final_topic and template.suggested_topics:
+            import json
+            try:
+                topics = json.loads(template.suggested_topics)
+                if topics and isinstance(topics, list) and len(topics) > 0:
+                    final_topic = topics[0]
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+        if not final_topic:
+            final_topic = f"使用「{template.name}」模板写作"
+
+        # 创建会话（带模板标记）
+        from app.plugins.wechat_writer.schemas import SessionCreateRequest
+        session = self.create_session(db, user_id, SessionCreateRequest(topic=final_topic))
+
+        # 增加模板使用次数
+        template.use_count = (template.use_count or 0) + 1
+        db.commit()
+
+        print(f"[Template] 从模板创建会话: template_id={template_id}, session_id={session.id}")
+        return session
 
 
 # 全局服务实例
