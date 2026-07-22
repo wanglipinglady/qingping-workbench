@@ -340,6 +340,107 @@ class WeChatWriterService:
             "response": response,
         }
 
+    async def generate_current_state_stream(
+        self, db: Session, user_id: int, session_id: int,
+        feedback: Optional[str] = None,
+    ):
+        """
+        在当前状态触发 AI 生成（流式版本，SSE 推送）
+
+        Returns:
+            AsyncGenerator[str, None]: 逐块推送的 JSON 字符串
+            格式: {"type": "chunk", "content": "..."} / {"type": "done", "full_content": "..."}
+        """
+        import json
+
+        session = self.get_session(db, user_id, session_id)
+        sm = self._get_state_machine(session)
+
+        current_state = sm.current_state
+        expert_type = get_expert_by_state(current_state)
+
+        if not expert_type:
+            yield json.dumps({"type": "error", "message": f"当前状态「{current_state}」没有对应的专家"})
+            return
+
+        print(f"[WeChatWriter] 流式 AI 生成, state={current_state}, expert={expert_type}")
+
+        # 构建 RAG 上下文
+        rag_context = ""
+        if current_state in ("research", "outline", "draft"):
+            queries = build_search_queries(session.topic, session.confirmed_topic)
+            all_results = []
+            for q in queries:
+                try:
+                    results = obsidian_reader.search(user_id, q, top_k=5)
+                    all_results.extend(results)
+                except Exception as e:
+                    print(f"[RAG] 搜索失败 query='{q}': {e}")
+            if all_results:
+                rag_context = format_rag_context(all_results, max_snippets=8)
+
+        context = {}
+        if rag_context:
+            context["rag_context"] = rag_context
+        if feedback:
+            context["is_regenerate"] = True
+            context["feedback"] = feedback
+
+        # 记录用户消息
+        if feedback:
+            self._add_message(
+                db, session_id, "user", feedback,
+                expert_type=None, state_label=current_state, iteration=sm.iteration,
+            )
+
+        # 获取历史消息
+        llm_messages = self._get_session_messages(db, session_id)
+
+        # 流式调用专家
+        full_content_parts = []
+        async for chunk in sm.generate_expert_response_stream(current_state, llm_messages, context):
+            if chunk and len(chunk.strip()) > 0:
+                full_content_parts.append(chunk)
+                yield json.dumps({"type": "chunk", "content": chunk}, ensure_ascii=False)
+
+        # 合并完整内容
+        full_response = "".join(full_content_parts)
+
+        # 记录 assistant 消息
+        self._add_message(
+            db, session_id, "assistant", full_response,
+            expert_type=expert_type, state_label=current_state, iteration=sm.iteration,
+        )
+
+        # 保存输出版本
+        step = self._state_to_step(current_state)
+        content_type = self._state_to_content_type(current_state)
+        latest = (
+            db.query(WeChatWriterOutput)
+            .filter(
+                WeChatWriterOutput.session_id == session_id,
+                WeChatWriterOutput.step == step,
+            )
+            .order_by(WeChatWriterOutput.version.desc())
+            .first()
+        )
+        new_version = (latest.version + 1) if latest else 1
+        self._add_output(
+            db, session_id, step=step, content_type=content_type,
+            content=full_response, version=new_version, feedback=feedback,
+        )
+
+        # 保存状态机状态
+        self._save_state_machine(db, session, sm)
+
+        # 推送完成事件
+        yield json.dumps({
+            "type": "done",
+            "full_content": full_response,
+            "state": current_state,
+            "expert": get_expert_name(expert_type),
+        }, ensure_ascii=False)
+
     def confirm_state(self, db: Session, user_id: int, session_id: int) -> dict:
         """确认当前状态，进入下一步
 

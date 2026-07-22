@@ -5,6 +5,7 @@
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query, Body
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -238,15 +239,88 @@ async def list_outputs(
     return unified_response(data=[i.__dict__ for i in items])
 
 
-# ========== SSE 流式输出（T3 实现） ==========
+# ========== SSE 流式输出 ==========
 
-@router.get("/sessions/{session_id}/stream", summary="SSE 流式输出（T3 实现）")
-async def stream_session(
+@router.get("/sessions/{session_id}/stream", summary="SSE 流式输出 AI 生成（EventSource 方式）")
+async def stream_session_get(
     session_id: int,
-    current_user: User = Depends(get_current_user),
+    token: str = Query(..., description="JWT 认证令牌（EventSource 不支持 header，用 query 参数）"),
+    feedback: Optional[str] = Query(None, description="修改建议（重新生成时使用）"),
+    db: Session = Depends(get_db),
 ):
-    """SSE 流式输出 AI 生成过程（T3 实现）"""
-    return unified_response(message="SSE 流式输出将在 T3 实现")
+    """
+    SSE 流式输出 AI 生成过程（EventSource 方式）
+
+    **注意**: 原生 EventSource 不支持自定义 header，认证通过 `token` query 参数传递
+
+    推送事件格式（每行都是 SSE data）：
+    - `{"type": "chunk", "content": "..."}` - 增量内容块
+    - `{"type": "done", "full_content": "...", "state": "...", "expert": "..."}` - 生成完成
+    - `{"type": "error", "message": "..."}` - 错误
+    """
+    from app.core.auth import decode_access_token
+    from app.plugins.user.models import User
+    import json
+
+    # 通过 query token 认证
+    payload = decode_access_token(token)
+    if not payload:
+        async def _error_gen():
+            yield f"data: {json.dumps({'type': 'error', 'message': '认证令牌无效'})}\n\n"
+        return StreamingResponse(_error_gen(), media_type="text/event-stream")
+
+    user_id = int(payload.get("sub"))
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        async def _error_gen():
+            yield f"data: {json.dumps({'type': 'error', 'message': '用户不存在'})}\n\n"
+        return StreamingResponse(_error_gen(), media_type="text/event-stream")
+
+    async def _sse_gen():
+        try:
+            async for data in wechat_writer_service.generate_current_state_stream(
+                db, user.id, session_id, feedback=feedback
+            ):
+                yield f"data: {data}\n\n"
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+
+    return StreamingResponse(_sse_gen(), media_type="text/event-stream")
+
+
+@router.post("/sessions/{session_id}/generate/stream", summary="SSE 流式输出 AI 生成（POST 方式，推荐）")
+async def stream_session_post(
+    session_id: int,
+    request: StateTransitionRequest = Body(default=None),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    SSE 流式输出 AI 生成过程（POST 方式，推荐）
+
+    支持通过 Authorization header 认证，比 GET query token 方式更安全。
+    前端请使用 fetch + ReadableStream 方式消费，不要用 EventSource。
+
+    推送事件格式同 GET 版本。
+    """
+    import json
+
+    feedback = request.feedback if request else None
+
+    async def _sse_gen():
+        try:
+            async for data in wechat_writer_service.generate_current_state_stream(
+                db, current_user.id, session_id, feedback=feedback
+            ):
+                yield f"data: {data}\n\n"
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+
+    return StreamingResponse(_sse_gen(), media_type="text/event-stream")
 
 
 # ========== Obsidian 同步 ==========
