@@ -517,6 +517,108 @@ class ObsidianReader:
     # 公共 API：语义搜索
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _extract_complete_sentence(text: str, max_len: int = 500) -> str:
+        """
+        从文本中提取从完整句子开始的片段
+
+        策略：
+        1. 如果文本开头就是句子中间（不是换行/标题/标点后），回溯到最近的句子开头
+        2. 句子开头包括：换行、标题标记（#）、句号/问号/感叹号后、段首
+        3. 返回的内容不超过 max_len 字符
+
+        Args:
+            text: 原始文本片段
+            max_len: 最大返回长度
+
+        Returns:
+            从完整句子开始的文本片段
+        """
+        if not text:
+            return ""
+
+        # 先截断到最大长度
+        truncated = text[:max_len] if len(text) > max_len else text
+
+        # 定义句子开头的模式（向前查找）
+        # 匹配: 段首、标题行、句号/问号/感叹号/冒号后、换行后
+        sentence_start_pattern = r'(?:^|\n|\r|。|！|？|\.|!|\?|：|:)\s*'
+
+        import re
+        # 找到所有句子开头的位置
+        positions = [0]  # 默认从开头开始
+        for match in re.finditer(sentence_start_pattern, truncated):
+            end_pos = match.end()
+            if end_pos < len(truncated) - 1:  # 至少还有内容
+                positions.append(end_pos)
+
+        # 如果开头就是不完整的（前面有重叠字符导致截断），找到最近的句子开头
+        # 检查文本开头是否像一个完整句子的开头
+        first_chars = truncated[:20]
+        looks_like_incomplete = (
+            not first_chars.strip() == first_chars  # 不以空白开头
+            and not first_chars.startswith('#')  # 不是标题
+            and not first_chars.startswith('\n')  # 不是换行
+            and len(positions) > 1  # 有其他可选的句子开头
+        )
+
+        if looks_like_incomplete:
+            # 找到最接近开头的句子开头位置
+            # 取第二个位置（第一个是位置0）
+            start_pos = positions[1] if len(positions) > 1 else 0
+            result = truncated[start_pos:].lstrip()
+        else:
+            result = truncated.lstrip()
+
+        # 如果结果太短，尝试返回更多
+        if len(result) < 50 and len(text) > len(result):
+            result = text[:max_len].lstrip()
+
+        return result
+
+    @staticmethod
+    def _diversified_rerank(results: List[Dict[str, Any]], top_k: int) -> List[Dict[str, Any]]:
+        """
+        多样性重排：确保返回结果来自不同的文档
+
+        策略：
+        1. 第一轮：每个文档选一个最高分的结果
+        2. 第二轮：如果还不够 top_k，按分数从高到低补充
+
+        Args:
+            results: 原始搜索结果（按分数降序）
+            top_k: 需要返回的数量
+
+        Returns:
+            多样性重排后的结果
+        """
+        if len(results) <= top_k:
+            return results
+
+        # 第一轮：每个文档选一个最高分
+        seen_paths = set()
+        picked = []
+        remaining = []
+
+        for r in results:
+            path = r.get("path", "")
+            if path not in seen_paths:
+                seen_paths.add(path)
+                picked.append(r)
+                if len(picked) >= top_k:
+                    break
+            else:
+                remaining.append(r)
+
+        # 如果不够，按分数补充
+        if len(picked) < top_k:
+            for r in remaining:
+                picked.append(r)
+                if len(picked) >= top_k:
+                    break
+
+        return picked[:top_k]
+
     def search(
         self,
         user_id: int,
@@ -536,7 +638,7 @@ class ObsidianReader:
             搜索结果列表，每项包含：
             - path: 笔记相对路径
             - title: 笔记标题
-            - content: 匹配的内容片段
+            - content: 匹配的内容片段（从完整句子开始）
             - tags: 笔记标签
             - score: 相似度分数 (0-1)
         """
@@ -549,10 +651,13 @@ class ObsidianReader:
             # 这里先不过滤，在结果中过滤
             pass
 
+        # 多取一些结果（3倍），用于多样性重排 + 标签过滤
+        fetch_count = max(top_k * 3, 15)
+
         results = vector_store.search_with_score(
             collection_name=collection_name,
             query=query,
-            n_results=top_k * 2,  # 多取一些，用于标签过滤
+            n_results=fetch_count,
         )
 
         # 标签过滤 + 结果格式化
@@ -571,20 +676,24 @@ class ObsidianReader:
                 if not any(t in note_tags for t in tags):
                     continue
 
+            # 优化内容：从完整句子开始
+            raw_content = r.get("content", "")
+            clean_content = self._extract_complete_sentence(raw_content, max_len=600)
+
             formatted.append({
                 "path": metadata.get("path", ""),
                 "title": metadata.get("title", ""),
-                "content": r.get("content", ""),
+                "content": clean_content,
                 "tags": note_tags,
                 "score": r.get("score", 0),
                 "date": metadata.get("date", ""),
                 "word_count": metadata.get("word_count", 0),
             })
 
-            if len(formatted) >= top_k:
-                break
+        # 多样性重排：确保不同文档的结果都能出现
+        diversified = self._diversified_rerank(formatted, top_k)
 
-        return formatted
+        return diversified
 
     # ------------------------------------------------------------------
     # 公共 API：状态查询
