@@ -146,19 +146,34 @@ class VectorStore:
             metadatas: 元数据列表（可选）
             embeddings: 向量列表（可选，不提供则自动向量化）
         """
+        print(f"[VectorStore] add_documents: collection={collection_name}, docs={len(documents)}, ids={len(ids)}, embeddings={'已提供' if embeddings else '未提供'}")
+
         collection = self.create_collection(collection_name)
+        print(f"[VectorStore] 集合已获取: {collection_name}")
 
         # 如果没有提供向量，使用 MiniMax API 生成
         if embeddings is None:
+            print(f"[VectorStore] 开始生成向量...")
             embeddings = minimax_client.embed(documents)
+            print(f"[VectorStore] 向量生成完成: {len(embeddings)} 个")
+
+        final_metadatas = metadatas or [{} for _ in documents]
+        print(f"[VectorStore] 准备写入 ChromaDB: docs={len(documents)}, embeddings={len(embeddings)}, metadatas={len(final_metadatas)}")
 
         # ChromaDB 要求所有列表长度一致
-        collection.add(
-            documents=documents,
-            ids=ids,
-            metadatas=metadatas or [{} for _ in documents],
-            embeddings=embeddings,
-        )
+        try:
+            collection.add(
+                documents=documents,
+                ids=ids,
+                metadatas=final_metadatas,
+                embeddings=embeddings,
+            )
+            print(f"[VectorStore] ChromaDB 写入完成!")
+        except Exception as e:
+            print(f"[VectorStore] ChromaDB 写入失败: {e}")
+            import traceback
+            traceback.print_exc()
+            raise
 
     def search(
         self,
