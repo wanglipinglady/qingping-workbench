@@ -342,6 +342,12 @@ class WeChatWriterStateMachine:
             )
             full_messages.append({"role": "system", "content": regen_msg})
 
+        # 如果有 RAG 检索到的资料，注入到上下文中
+        if context and context.get("rag_context"):
+            rag_text = context["rag_context"]
+            if rag_text and len(rag_text.strip()) > 0:
+                full_messages.append({"role": "system", "content": rag_text})
+
         # 添加历史消息
         full_messages.extend(messages)
 
@@ -400,6 +406,12 @@ class WeChatWriterStateMachine:
                 feedback=context.get("feedback", "用户未给出具体建议，请换角度重新生成"),
             )
             full_messages.append({"role": "system", "content": regen_msg})
+
+        # 如果有 RAG 检索到的资料，注入到上下文中
+        if context and context.get("rag_context"):
+            rag_text = context["rag_context"]
+            if rag_text and len(rag_text.strip()) > 0:
+                full_messages.append({"role": "system", "content": rag_text})
 
         full_messages.extend(messages)
 

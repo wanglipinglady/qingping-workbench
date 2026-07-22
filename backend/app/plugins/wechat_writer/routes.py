@@ -4,7 +4,7 @@
 """
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Body
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -142,6 +142,29 @@ async def confirm_current_state(
     - 在 polish 状态：确认润色稿，进入 done
     """
     result = wechat_writer_service.confirm_state(db, current_user.id, session_id)
+    return unified_response(data=result)
+
+
+@router.post("/sessions/{session_id}/generate", summary="在当前状态触发 AI 生成")
+async def generate_current_state(
+    session_id: int,
+    request: StateTransitionRequest = Body(default=None),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    在当前状态触发对应专家的 AI 生成
+
+    适用场景：
+    - 确认进入新状态后（如 research/outline/draft/polish），调用此接口让专家开始工作
+    - research/outline/draft 状态会自动检索 Obsidian 知识库，注入 RAG 上下文
+
+    **feedback**: 修改建议（可选，仅在重新生成时使用）
+    """
+    feedback = request.feedback if request else None
+    result = wechat_writer_service.generate_current_state(
+        db, current_user.id, session_id, feedback=feedback
+    )
     return unified_response(data=result)
 
 

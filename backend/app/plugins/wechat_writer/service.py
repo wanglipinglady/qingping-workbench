@@ -29,6 +29,8 @@ from app.plugins.wechat_writer.experts import (
     get_expert_by_state,
     get_expert_name,
 )
+from app.plugins.wechat_writer.obsidian_reader import obsidian_reader
+from app.plugins.wechat_writer.rag_helper import format_rag_context, build_search_queries
 
 
 class WeChatWriterService:
@@ -230,6 +232,110 @@ class WeChatWriterService:
         return {
             "from_state": from_state,
             "to_state": to_state,
+            "expert": get_expert_name(expert_type),
+            "response": response,
+        }
+
+    def generate_current_state(
+        self, db: Session, user_id: int, session_id: int,
+        feedback: Optional[str] = None,
+    ) -> dict:
+        """在当前状态触发 AI 生成（通用方法，适用于所有工作状态）
+
+        当用户确认进入新状态后，调用此方法让对应专家开始工作。
+        会自动进行 RAG 检索（research/outline/draft 状态）并注入上下文。
+
+        Args:
+            feedback: 用户的修改建议（仅在重新生成时使用）
+
+        Returns:
+            dict: {
+                "from_state": 原状态,
+                "to_state": 新状态,
+                "expert": 专家名称,
+                "response": 专家生成的回复文本,
+            }
+        """
+        session = self.get_session(db, user_id, session_id)
+        sm = self._get_state_machine(session)
+
+        current_state = sm.current_state
+        expert_type = get_expert_by_state(current_state)
+
+        if not expert_type:
+            raise BusinessException(
+                f"当前状态「{STATE_LABELS.get(current_state, current_state)}」没有对应的专家，无法生成"
+            )
+
+        print(f"[WeChatWriter] 触发 AI 生成, state={current_state}, expert={expert_type}")
+
+        # 构建 RAG 上下文（research/outline/draft 状态需要知识库资料）
+        rag_context = ""
+        if current_state in ("research", "outline", "draft"):
+            queries = build_search_queries(session.topic, session.confirmed_topic)
+            print(f"[RAG] 搜索关键词: {queries}")
+            all_results = []
+            for q in queries:
+                try:
+                    results = obsidian_reader.search(user_id, q, top_k=5)
+                    all_results.extend(results)
+                except Exception as e:
+                    print(f"[RAG] 搜索失败 query='{q}': {e}")
+            if all_results:
+                rag_context = format_rag_context(all_results, max_snippets=8)
+                print(f"[RAG] 检索到 {len(all_results)} 条资料，已格式化注入上下文")
+
+        # 构建上下文
+        context = {}
+        if rag_context:
+            context["rag_context"] = rag_context
+        if feedback:
+            context["is_regenerate"] = True
+            context["feedback"] = feedback
+
+        # 记录用户消息（如果有反馈）
+        if feedback:
+            self._add_message(
+                db, session_id, "user", feedback,
+                expert_type=None, state_label=current_state, iteration=sm.iteration,
+            )
+
+        # 获取历史消息
+        llm_messages = self._get_session_messages(db, session_id)
+
+        # 调用专家生成回复
+        response = sm.generate_expert_response(current_state, llm_messages, context)
+
+        # 记录 assistant 消息
+        self._add_message(
+            db, session_id, "assistant", response,
+            expert_type=expert_type, state_label=current_state, iteration=sm.iteration,
+        )
+
+        # 保存输出版本
+        step = self._state_to_step(current_state)
+        content_type = self._state_to_content_type(current_state)
+        latest = (
+            db.query(WeChatWriterOutput)
+            .filter(
+                WeChatWriterOutput.session_id == session_id,
+                WeChatWriterOutput.step == step,
+            )
+            .order_by(WeChatWriterOutput.version.desc())
+            .first()
+        )
+        new_version = (latest.version + 1) if latest else 1
+        self._add_output(
+            db, session_id, step=step, content_type=content_type,
+            content=response, version=new_version, feedback=feedback,
+        )
+
+        # 保存状态机状态
+        self._save_state_machine(db, session, sm)
+
+        return {
+            "from_state": current_state,
+            "to_state": current_state,
             "expert": get_expert_name(expert_type),
             "response": response,
         }
