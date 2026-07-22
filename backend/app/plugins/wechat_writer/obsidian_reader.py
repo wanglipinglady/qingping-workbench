@@ -450,6 +450,8 @@ class ObsidianReader:
                 if not chunks:
                     chunks = [note["content"]]
 
+                logger.info(f"[Obsidian] 正在向量化: {rel_path} ({len(chunks)} 个分块)")
+
                 # 构建 ID 和元数据
                 chunk_ids = [f"obsidian_{user_id}_{self._path_to_id(rel_path)}_chunk_{i}" for i in range(len(chunks))]
                 metadatas = [{
@@ -469,6 +471,8 @@ class ObsidianReader:
                     ids=chunk_ids,
                     metadatas=metadatas,
                 )
+
+                logger.info(f"[Obsidian] 完成向量化: {rel_path}")
 
                 if is_new:
                     result["added"] += 1
