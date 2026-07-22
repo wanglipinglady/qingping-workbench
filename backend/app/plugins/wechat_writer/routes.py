@@ -243,7 +243,9 @@ async def sync_obsidian(
 
     返回同步结果统计
     """
+    print(f"[Obsidian API] 收到同步请求, user_id={current_user.id}")
     result = obsidian_reader.sync(current_user.id)
+    print(f"[Obsidian API] 同步完成: {result}")
     return unified_response(data=result)
 
 

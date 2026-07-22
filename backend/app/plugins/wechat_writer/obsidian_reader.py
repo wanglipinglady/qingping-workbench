@@ -24,6 +24,13 @@ from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
+# 确保日志级别是 INFO
+logger.setLevel(logging.INFO)
+if not logger.handlers:
+    handler = logging.StreamHandler()
+    handler.setLevel(logging.INFO)
+    logger.addHandler(handler)
+
 from app.core.config import settings
 from app.capabilities.rag.vector_store import vector_store
 from app.capabilities.rag.text_splitter import TextSplitter
