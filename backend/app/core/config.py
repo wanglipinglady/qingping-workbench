@@ -69,6 +69,11 @@ class Settings(BaseSettings):
         default="./data/chroma", description="ChromaDB 持久化存储目录"
     )
 
+    # 向量存储后端: "chromadb" (默认, 高性能但需要原生扩展) 或 "simple" (纯 Python, 跨平台兼容)
+    VECTOR_STORE_BACKEND: str = Field(
+        default="chromadb", description="向量存储后端: chromadb 或 simple"
+    )
+
     # ========== 文件上传配置 ==========
     # 上传文件存储目录
     UPLOAD_DIR: str = Field(default="./uploads", description="文件上传存储目录")

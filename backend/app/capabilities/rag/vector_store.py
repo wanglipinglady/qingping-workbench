@@ -435,5 +435,22 @@ class VectorStore:
         return collection.count()
 
 
+def _create_vector_store():
+    """根据配置创建向量存储实例"""
+    backend = settings.VECTOR_STORE_BACKEND.lower()
+    if backend == "simple":
+        _p("[VectorStore] 使用纯 Python 后端 (SimpleVectorStore)")
+        from app.capabilities.rag.simple_vector_store import SimpleVectorStore
+        return SimpleVectorStore()
+    else:
+        _p("[VectorStore] 使用 ChromaDB 后端")
+        try:
+            return VectorStore()
+        except Exception as e:
+            _p(f"[VectorStore] ChromaDB 初始化失败: {e}, 降级到 SimpleVectorStore")
+            from app.capabilities.rag.simple_vector_store import SimpleVectorStore
+            return SimpleVectorStore()
+
+
 # 全局单例
-vector_store = VectorStore()
+vector_store = _create_vector_store()
