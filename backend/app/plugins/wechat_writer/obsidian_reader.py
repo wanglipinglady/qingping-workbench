@@ -16,9 +16,13 @@ import os
 import re
 import json
 import time
+import logging
+import traceback
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 from app.core.config import settings
 from app.capabilities.rag.vector_store import vector_store
@@ -404,7 +408,8 @@ class ObsidianReader:
                 where = {"path": rel_path}
                 vector_store.delete_documents(collection_name, where=where)
                 result["deleted"] += 1
-            except Exception:
+            except Exception as e:
+                logger.error(f"[Obsidian] 删除向量数据失败: {rel_path}, 错误: {e}")
                 result["errors"] += 1
 
         # 处理新增和修改的文件
@@ -470,7 +475,9 @@ class ObsidianReader:
                 else:
                     result["updated"] += 1
 
-            except Exception:
+            except Exception as e:
+                logger.error(f"[Obsidian] 处理文件失败: {rel_path}, 错误: {e}")
+                logger.error(traceback.format_exc())
                 result["errors"] += 1
                 new_files_state[rel_path]["indexed"] = False
 
