@@ -441,7 +441,7 @@ class ObsidianReader:
                     vector_store.delete_documents(collection_name, where={"path": rel_path})
 
                 # 文本分块
-                chunks = self.text_splitter.split(note["content"])
+                chunks = self.text_splitter.split_text(note["content"])
                 if not chunks:
                     chunks = [note["content"]]
 
