@@ -197,6 +197,7 @@ class MiniMaxClient:
         texts: List[str],
         model: Optional[str] = None,
         embed_type: str = "db",
+        batch_size: int = 5,
         **kwargs,
     ) -> List[List[float]]:
         """
@@ -206,6 +207,7 @@ class MiniMaxClient:
             texts: 待向量化的文本列表
             model: Embedding 模型名称，默认使用配置的模型
             embed_type: 向量类型，"db" 用于构建向量库（被检索文本），"query" 用于查询
+            batch_size: 每批处理的文本数量（默认 5，避免单次请求过大）
             **kwargs: 其他参数
 
         Returns:
@@ -214,62 +216,75 @@ class MiniMaxClient:
         Raises:
             Exception: API 调用失败时抛出
         """
-        import logging as _log
-        _logger = _log.getLogger(__name__)
-
         if not texts:
-            _logger.warning("[MiniMax Embedding] 空输入，返回空列表")
+            print("[MiniMax Embedding] 空输入，返回空列表")
             return []
 
         use_model = model or self.embedding_model
-        _logger.info(f"[MiniMax Embedding] 开始向量化: {len(texts)} 段文本, model={use_model}, type={embed_type}")
+        print(f"[MiniMax Embedding] 开始向量化: {len(texts)} 段文本, model={use_model}, type={embed_type}, batch_size={batch_size}")
 
         url = f"{self.base_url}/embeddings"
-        payload = {
-            "model": use_model,
-            "texts": texts,
-            "type": embed_type,  # MiniMax API 必填参数: "db" 或 "query"
-        }
-        payload.update(kwargs)
+        all_embeddings: List[List[float]] = []
 
-        try:
-            _logger.info(f"[MiniMax Embedding] 发起 API 请求: url={url}, texts={len(texts)}段, timeout={self.generic_timeout}s")
-            response = self._request_with_retry(
-                "POST", url, headers=self._headers, json=payload
-            )
-            result = response.json()
-            _logger.info(f"[MiniMax Embedding] API 响应 keys: {list(result.keys())}")
+        # 分批处理
+        total_batches = (len(texts) + batch_size - 1) // batch_size
+        for batch_idx in range(total_batches):
+            start = batch_idx * batch_size
+            end = min(start + batch_size, len(texts))
+            batch_texts = texts[start:end]
 
-            # 检查 API 错误
-            if "base_resp" in result:
-                status_code = result["base_resp"].get("status_code")
-                status_msg = result["base_resp"].get("status_msg")
-                if status_code and status_code != 0:
-                    raise Exception(f"MiniMax API 错误: code={status_code}, msg={status_msg}")
+            print(f"[MiniMax Embedding] 处理第 {batch_idx + 1}/{total_batches} 批: {len(batch_texts)} 段文本")
 
-            # 解析向量结果
-            # 不同 API 返回格式可能略有不同，此处做兼容处理
-            if "data" in result:
-                embeddings = []
-                for item in result["data"]:
-                    if "embedding" in item:
-                        embeddings.append(item["embedding"])
-                _logger.info(f"[MiniMax Embedding] 从 data 解析到 {len(embeddings)} 个向量")
-                if not embeddings:
-                    raise Exception(f"Embedding 响应 data 为空: {result}")
-                return embeddings
-            elif "vectors" in result:
-                vectors = result["vectors"]
-                _logger.info(f"[MiniMax Embedding] 从 vectors 解析到 {len(vectors)} 个向量")
-                return vectors
-            else:
-                raise Exception(f"无法解析 Embedding 响应: {result}")
-        except requests.RequestException as e:
-            _logger.error(f"[MiniMax Embedding] 网络请求失败: {e}")
-            raise Exception(f"MiniMax Embedding API 调用失败: {e}") from e
-        except Exception as e:
-            _logger.error(f"[MiniMax Embedding] 失败: {e}")
-            raise
+            payload = {
+                "model": use_model,
+                "texts": batch_texts,
+                "type": embed_type,  # MiniMax API 必填参数: "db" 或 "query"
+            }
+            payload.update(kwargs)
+
+            try:
+                print(f"[MiniMax Embedding] 发起 API 请求: url={url}, timeout={self.generic_timeout}s")
+                response = self._request_with_retry(
+                    "POST", url, headers=self._headers, json=payload
+                )
+                result = response.json()
+                print(f"[MiniMax Embedding] API 响应 keys: {list(result.keys())}")
+
+                # 检查 API 错误
+                if "base_resp" in result:
+                    status_code = result["base_resp"].get("status_code")
+                    status_msg = result["base_resp"].get("status_msg")
+                    if status_code and status_code != 0:
+                        raise Exception(f"MiniMax API 错误: code={status_code}, msg={status_msg}")
+
+                # 解析向量结果
+                batch_embeddings: List[List[float]] = []
+                if "data" in result:
+                    for item in result["data"]:
+                        if "embedding" in item:
+                            batch_embeddings.append(item["embedding"])
+                    print(f"[MiniMax Embedding] 第 {batch_idx + 1} 批: 从 data 解析到 {len(batch_embeddings)} 个向量")
+                elif "vectors" in result:
+                    batch_embeddings = result["vectors"]
+                    print(f"[MiniMax Embedding] 第 {batch_idx + 1} 批: 从 vectors 解析到 {len(batch_embeddings)} 个向量")
+                else:
+                    raise Exception(f"Embedding 响应格式未知: {list(result.keys())}, 完整响应: {result}")
+
+                if not batch_embeddings:
+                    raise Exception(f"Embedding 响应中没有向量: {result}")
+
+                if len(batch_embeddings) != len(batch_texts):
+                    print(f"[MiniMax Embedding] 警告: 输入 {len(batch_texts)} 段, 返回 {len(batch_embeddings)} 个向量")
+
+                all_embeddings.extend(batch_embeddings)
+                print(f"[MiniMax Embedding] 第 {batch_idx + 1}/{total_batches} 批完成")
+
+            except Exception as e:
+                print(f"[MiniMax Embedding] 第 {batch_idx + 1} 批失败: {e}")
+                raise
+
+        print(f"[MiniMax Embedding] 全部完成: 共 {len(all_embeddings)} 个向量")
+        return all_embeddings
 
     def get_chat_reply(
         self,
