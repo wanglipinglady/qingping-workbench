@@ -381,12 +381,16 @@ class ObsidianReader:
             "last_sync_time": time.time(),
         }
 
+        logger.info(f"[Obsidian] 开始同步 user_id={user_id}, vault={self.vault_path}")
+
         # 检查 Vault 路径
         if not self.vault_path.exists():
+            logger.error(f"[Obsidian] Vault 路径不存在: {self.vault_path}")
             result["errors"] = 1
             return result
 
         collection_name = self._get_collection_name(user_id)
+        logger.info(f"[Obsidian] 集合名: {collection_name}")
 
         # 加载上次同步状态
         sync_state = self._load_sync_state()
@@ -396,6 +400,7 @@ class ObsidianReader:
         # 扫描当前文件
         current_files = self.scan_files()
         result["total_files"] = len(current_files)
+        logger.info(f"[Obsidian] 扫描到 {len(current_files)} 个文件, 上次已同步 {len(old_files)} 个")
 
         # 构建当前文件的路径索引
         current_paths = {f["relative_path"]: f for f in current_files}
