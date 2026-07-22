@@ -646,8 +646,9 @@ class ObsidianReader:
             # 这里先不过滤，在结果中过滤
             pass
 
-        # 多取一些结果（3倍），用于多样性重排 + 标签过滤
-        fetch_count = max(top_k * 3, 15)
+        # 多取一些结果（10倍，至少 50 条），用于多样性重排 + 标签过滤
+        # 长文档会产生很多语义接近的 chunk，需要扩大候选池才能让其他文档有机会出现
+        fetch_count = max(top_k * 10, 50)
 
         results = vector_store.search_with_score(
             collection_name=collection_name,
