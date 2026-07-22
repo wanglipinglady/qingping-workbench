@@ -22,6 +22,7 @@ from app.plugins.wechat_writer.schemas import (
     MessageResponse,
 )
 from app.plugins.wechat_writer.service import wechat_writer_service
+from app.plugins.wechat_writer.obsidian_reader import obsidian_reader
 
 router = APIRouter(
     prefix="/wechat-writer",
@@ -223,3 +224,63 @@ async def stream_session(
 ):
     """SSE 流式输出 AI 生成过程（T3 实现）"""
     return unified_response(message="SSE 流式输出将在 T3 实现")
+
+
+# ========== Obsidian 同步 ==========
+
+@router.post("/obsidian/sync", summary="手动触发 Obsidian 同步")
+async def sync_obsidian(
+    current_user: User = Depends(get_current_user),
+):
+    """
+    手动触发 Obsidian Vault 同步
+
+    执行增量同步：
+    - 扫描 Vault 中所有 .md 文件
+    - 解析 Frontmatter 和标签
+    - 新增/修改的文件向量化后存入 ChromaDB
+    - 删除的文件从向量库移除
+
+    返回同步结果统计
+    """
+    result = obsidian_reader.sync(current_user.id)
+    return unified_response(data=result)
+
+
+@router.get("/obsidian/status", summary="获取 Obsidian 同步状态")
+async def get_obsidian_status(
+    current_user: User = Depends(get_current_user),
+):
+    """
+    获取当前用户的 Obsidian 同步状态
+
+    返回：
+    - vault_path: Vault 路径
+    - vault_exists: Vault 是否存在
+    - last_sync_time: 上次同步时间戳（0 表示未同步）
+    - total_notes: 已索引的笔记数量
+    - total_chunks: 向量分块总数
+    """
+    result = obsidian_reader.get_sync_status(current_user.id)
+    return unified_response(data=result)
+
+
+@router.post("/obsidian/search", summary="在 Obsidian 笔记中语义搜索")
+async def search_obsidian(
+    request: dict,
+    current_user: User = Depends(get_current_user),
+):
+    """
+    在 Obsidian 笔记中进行语义搜索
+
+    - **query**: 搜索关键词（必填）
+    - **top_k**: 返回结果数量（可选，默认 5）
+    - **tags**: 按标签过滤（可选，列表）
+    """
+    query = request.get("query", "")
+    if not query:
+        raise ValueError("query 不能为空")
+    top_k = request.get("top_k", 5)
+    tags = request.get("tags")
+    results = obsidian_reader.search(current_user.id, query, top_k=top_k, tags=tags)
+    return unified_response(data=results)

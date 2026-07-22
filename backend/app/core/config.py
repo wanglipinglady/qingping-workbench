@@ -75,6 +75,23 @@ class Settings(BaseSettings):
     # 单个文件最大大小（MB）
     MAX_UPLOAD_SIZE: int = Field(default=50, description="单个文件最大上传大小（MB）")
 
+    # ========== Obsidian 配置 ==========
+    # Obsidian Vault 根路径（本地开发时指向你的知识库目录）
+    OBSIDIAN_VAULT_PATH: str = Field(
+        default="",
+        description="Obsidian Vault 根路径，如 D:/obsidian/knowledge_base",
+    )
+    # Obsidian 同步时排除的目录（相对 Vault 根路径，逗号分隔）
+    OBSIDIAN_EXCLUDE_DIRS: str = Field(
+        default=".git,.obsidian,.trash,templates",
+        description="Obsidian 同步排除目录（逗号分隔）",
+    )
+    # Obsidian 包含标签（只索引包含这些标签的笔记，空表示全部）
+    OBSIDIAN_INCLUDE_TAGS: str = Field(
+        default="",
+        description="只索引包含指定标签的笔记（逗号分隔，空=全部）",
+    )
+
     # ========== 日志配置 ==========
     # 日志级别: DEBUG / INFO / WARNING / ERROR
     LOG_LEVEL: str = Field(default="INFO", description="日志级别")
