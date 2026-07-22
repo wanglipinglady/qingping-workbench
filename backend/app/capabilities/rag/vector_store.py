@@ -60,12 +60,25 @@ class VectorStore:
         # 同时必须指定 embedding_function，否则 ChromaDB 会尝试加载默认的
         # ONNXMiniLM_L6_V2，它依赖 onnxruntime（在 Python 3.13 下有 DLL 问题）
         from chromadb.api.types import EmbeddingFunction, Documents, Embeddings
+        import logging as _logging
+        _ef_logger = _logging.getLogger(__name__)
 
         class MiniMaxEmbeddingFunction(EmbeddingFunction):
             """使用 MiniMax API 的 Embedding 函数"""
 
             def __call__(self, input: Documents) -> Embeddings:
-                return minimax_client.embed(list(input))
+                try:
+                    texts = list(input)
+                    if not texts:
+                        return []
+                    vectors = minimax_client.embed(texts)
+                    if vectors is None:
+                        _ef_logger.error("[Embedding] minimax_client.embed 返回 None！")
+                        raise RuntimeError("MiniMax Embedding API 返回 None")
+                    return vectors
+                except Exception as e:
+                    _ef_logger.error(f"[Embedding] 失败: {e}", exc_info=True)
+                    raise
 
         collection = self.client.get_or_create_collection(
             name=name,
