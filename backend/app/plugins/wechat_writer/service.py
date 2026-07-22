@@ -15,7 +15,6 @@ from app.plugins.wechat_writer.models import (
     WeChatWriterMessage,
     WeChatWriterOutput,
     WeChatWriterTemplate,
-    STATE_LABELS,
 )
 from app.plugins.wechat_writer.schemas import (
     SessionCreateRequest,
