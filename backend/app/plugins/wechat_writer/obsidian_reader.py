@@ -344,6 +344,14 @@ class ObsidianReader:
         with open(SYNC_STATE_FILE, "w", encoding="utf-8") as f:
             json.dump(state, f, ensure_ascii=False, indent=2)
 
+    def clear_sync_state(self, user_id: int) -> None:
+        """清除指定用户的同步状态（用于强制全量重新同步）"""
+        state = self._load_sync_state()
+        if str(user_id) in state:
+            del state[str(user_id)]
+            self._save_sync_state(state)
+            print(f"[Obsidian] 已清除 user_id={user_id} 的同步状态")
+
     @staticmethod
     def _get_collection_name(user_id: int) -> str:
         """获取用户的 Obsidian 集合名"""

@@ -233,6 +233,7 @@ class MiniMaxClient:
         payload.update(kwargs)
 
         try:
+            _logger.info(f"[MiniMax Embedding] 发起 API 请求: url={url}, texts={len(texts)}段, timeout={self.generic_timeout}s")
             response = self._request_with_retry(
                 "POST", url, headers=self._headers, json=payload
             )

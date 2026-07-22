@@ -231,6 +231,7 @@ async def stream_session(
 @router.post("/obsidian/sync", summary="手动触发 Obsidian 同步")
 async def sync_obsidian(
     current_user: User = Depends(get_current_user),
+    force: bool = Query(False, description="是否强制全量重新同步（忽略之前的同步状态）"),
 ):
     """
     手动触发 Obsidian Vault 同步
@@ -243,7 +244,10 @@ async def sync_obsidian(
 
     返回同步结果统计
     """
-    print(f"[Obsidian API] 收到同步请求, user_id={current_user.id}")
+    print(f"[Obsidian API] 收到同步请求, user_id={current_user.id}, force={force}")
+    if force:
+        print(f"[Obsidian API] 强制全量重新同步，清除旧状态")
+        obsidian_reader.clear_sync_state(current_user.id)
     result = obsidian_reader.sync(current_user.id)
     print(f"[Obsidian API] 同步完成: {result}")
     return unified_response(data=result)
