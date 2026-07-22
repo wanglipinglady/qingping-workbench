@@ -55,9 +55,11 @@ class VectorStore:
             ChromaDB 集合对象
         """
         # 使用 get_or_create 避免重复创建
+        # 注意：ChromaDB 新版本（Python 3.13 下）不允许 metadata 为空字典
+        # 必须传入 None 或非空字典
         collection = self.client.get_or_create_collection(
             name=name,
-            metadata=metadata or {},
+            metadata=metadata if metadata else None,
         )
         return collection
 
