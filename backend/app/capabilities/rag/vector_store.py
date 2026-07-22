@@ -3,6 +3,8 @@
 基于 ChromaDB 的向量数据库封装
 """
 import os
+import sys
+import time
 from typing import List, Dict, Any, Optional
 
 import chromadb
@@ -10,6 +12,51 @@ from chromadb.config import Settings as ChromaSettings
 
 from app.core.config import settings
 from app.capabilities.llm.minimax_client import minimax_client
+
+
+def _p(msg: str) -> None:
+    """打印并立即刷新输出，确保日志可见（解决 Windows/Python 3.13 下缓冲问题）"""
+    print(msg, flush=True)
+
+
+def _sanitize_metadata(meta: Dict[str, Any]) -> Dict[str, Any]:
+    """清理元数据，确保所有值都是 ChromaDB 支持的类型 (str, int, float, bool)"""
+    clean = {}
+    for k, v in meta.items():
+        if v is None:
+            continue  # 跳过 None 值
+        if isinstance(v, (str, int, float, bool)):
+            clean[k] = v
+        else:
+            # 其他类型转为字符串
+            clean[k] = str(v)
+    return clean
+
+
+def _create_minimax_ef():
+    """创建 MiniMax EmbeddingFunction（带 print 日志，确保一定有输出）"""
+    from chromadb.api.types import EmbeddingFunction, Documents, Embeddings
+
+    class MiniMaxEmbeddingFunction(EmbeddingFunction):
+        """使用 MiniMax API 的 Embedding 函数"""
+
+        def __call__(self, input: Documents) -> Embeddings:
+            texts = list(input)
+            _p(f"[MiniMaxEF] ChromaDB 调用 embedding_function: {len(texts)} 段文本")
+            if not texts:
+                return []
+            try:
+                vectors = minimax_client.embed(texts)
+                if vectors is None:
+                    _p("[MiniMaxEF] embed 返回 None")
+                    raise RuntimeError("MiniMax Embedding API 返回 None")
+                _p(f"[MiniMaxEF] 完成: {len(vectors)} 个向量")
+                return vectors
+            except Exception as e:
+                _p(f"[MiniMaxEF] 失败: {e}")
+                raise
+
+    return MiniMaxEmbeddingFunction()
 
 
 class VectorStore:
@@ -29,6 +76,7 @@ class VectorStore:
 
         # 确保持久化目录存在
         os.makedirs(self.persist_dir, exist_ok=True)
+        _p(f"[VectorStore] 初始化 ChromaDB 客户端, persist_dir={self.persist_dir}")
 
         # 创建 ChromaDB 客户端（本地持久化模式）
         self.client = chromadb.PersistentClient(
@@ -38,6 +86,10 @@ class VectorStore:
                 allow_reset=False,
             ),
         )
+        _p(f"[VectorStore] ChromaDB 客户端已创建 (version={chromadb.__version__})")
+
+        # 缓存 embedding_function，避免每次创建集合都重新实例化
+        self._ef = _create_minimax_ef()
 
     def create_collection(
         self,
@@ -54,37 +106,18 @@ class VectorStore:
         Returns:
             ChromaDB 集合对象
         """
-        # 使用 get_or_create 避免重复创建
+        _p(f"[VectorStore] create_collection: {name}")
+        t0 = time.time()
         # 注意：ChromaDB 新版本（Python 3.13 下）不允许 metadata 为空字典
         # 必须传入 None 或非空字典
         # 同时必须指定 embedding_function，否则 ChromaDB 会尝试加载默认的
         # ONNXMiniLM_L6_V2，它依赖 onnxruntime（在 Python 3.13 下有 DLL 问题）
-        from chromadb.api.types import EmbeddingFunction, Documents, Embeddings
-        import logging as _logging
-        _ef_logger = _logging.getLogger(__name__)
-
-        class MiniMaxEmbeddingFunction(EmbeddingFunction):
-            """使用 MiniMax API 的 Embedding 函数"""
-
-            def __call__(self, input: Documents) -> Embeddings:
-                try:
-                    texts = list(input)
-                    if not texts:
-                        return []
-                    vectors = minimax_client.embed(texts)
-                    if vectors is None:
-                        _ef_logger.error("[Embedding] minimax_client.embed 返回 None！")
-                        raise RuntimeError("MiniMax Embedding API 返回 None")
-                    return vectors
-                except Exception as e:
-                    _ef_logger.error(f"[Embedding] 失败: {e}", exc_info=True)
-                    raise
-
         collection = self.client.get_or_create_collection(
             name=name,
             metadata=metadata if metadata else None,
-            embedding_function=MiniMaxEmbeddingFunction(),
+            embedding_function=self._ef,
         )
+        _p(f"[VectorStore] 集合已创建/获取: {name} (耗时 {time.time()-t0:.3f}s, 当前 {collection.count()} 条)")
         return collection
 
     def delete_collection(self, name: str) -> None:
@@ -96,6 +129,7 @@ class VectorStore:
         """
         try:
             self.client.delete_collection(name=name)
+            _p(f"[VectorStore] 集合已删除: {name}")
         except Exception:
             # 集合不存在时忽略
             pass
@@ -111,22 +145,18 @@ class VectorStore:
             集合对象，不存在则返回 None
         """
         try:
-            return self.client.get_collection(name=name)
+            return self.client.get_collection(name=name, embedding_function=self._ef)
         except Exception:
             return None
 
     def list_collections(self) -> List[str]:
         """
-        列出所有集合名称
+        列出所有集合
 
         Returns:
             集合名称列表
         """
-        try:
-            collections = self.client.list_collections()
-            return [col.name for col in collections]
-        except Exception:
-            return []
+        return [col.name for col in self.client.list_collections()]
 
     def add_documents(
         self,
@@ -135,9 +165,10 @@ class VectorStore:
         ids: List[str],
         metadatas: Optional[List[Dict[str, Any]]] = None,
         embeddings: Optional[List[List[float]]] = None,
+        batch_size: int = 5,
     ) -> None:
         """
-        向集合中添加文档
+        向集合中添加文档（分批写入，避免单次请求过大）
 
         Args:
             collection_name: 集合名称
@@ -145,35 +176,66 @@ class VectorStore:
             ids: 文档 ID 列表
             metadatas: 元数据列表（可选）
             embeddings: 向量列表（可选，不提供则自动向量化）
+            batch_size: 每批写入的文档数量（默认 5）
         """
-        print(f"[VectorStore] add_documents: collection={collection_name}, docs={len(documents)}, ids={len(ids)}, embeddings={'已提供' if embeddings else '未提供'}")
+        _p(f"[VectorStore] add_documents: collection={collection_name}, total_docs={len(documents)}, batch_size={batch_size}")
+        t_total = time.time()
 
+        # 1. 创建/获取集合
+        _p(f"[VectorStore] 步骤1: 获取集合...")
         collection = self.create_collection(collection_name)
-        print(f"[VectorStore] 集合已获取: {collection_name}")
 
-        # 如果没有提供向量，使用 MiniMax API 生成
-        if embeddings is None:
-            print(f"[VectorStore] 开始生成向量...")
-            embeddings = minimax_client.embed(documents)
-            print(f"[VectorStore] 向量生成完成: {len(embeddings)} 个")
+        # 2. 生成向量（如果没提供）
+        _p(f"[VectorStore] 步骤2: 向量化...")
+        final_embeddings = embeddings
+        if final_embeddings is None:
+            _p(f"[VectorStore] 开始生成向量...")
+            final_embeddings = minimax_client.embed(documents)
+            _p(f"[VectorStore] 向量生成完成: {len(final_embeddings)} 个")
+        else:
+            _p(f"[VectorStore] 使用外部传入的 embeddings: {len(final_embeddings)} 个")
 
-        final_metadatas = metadatas or [{} for _ in documents]
-        print(f"[VectorStore] 准备写入 ChromaDB: docs={len(documents)}, embeddings={len(embeddings)}, metadatas={len(final_metadatas)}")
+        # 3. 准备元数据（清理类型）
+        _p(f"[VectorStore] 步骤3: 准备元数据...")
+        raw_metadatas = metadatas or [{} for _ in documents]
+        final_metadatas = [_sanitize_metadata(m) for m in raw_metadatas]
+        _p(f"[VectorStore] 元数据已清理: {len(final_metadatas)} 条")
 
-        # ChromaDB 要求所有列表长度一致
-        try:
-            collection.add(
-                documents=documents,
-                ids=ids,
-                metadatas=final_metadatas,
-                embeddings=embeddings,
-            )
-            print(f"[VectorStore] ChromaDB 写入完成!")
-        except Exception as e:
-            print(f"[VectorStore] ChromaDB 写入失败: {e}")
-            import traceback
-            traceback.print_exc()
-            raise
+        # 校验长度一致
+        assert len(documents) == len(ids) == len(final_metadatas) == len(final_embeddings), \
+            f"长度不一致: docs={len(documents)}, ids={len(ids)}, metas={len(final_metadatas)}, embs={len(final_embeddings)}"
+
+        # 4. 分批写入 ChromaDB
+        _p(f"[VectorStore] 准备写入 ChromaDB: docs={len(documents)}, embeddings={len(final_embeddings)}, metadatas={len(final_metadatas)}")
+        total_batches = (len(documents) + batch_size - 1) // batch_size
+        _p(f"[VectorStore] 共 {total_batches} 批, 每批最多 {batch_size} 条")
+
+        for batch_idx in range(total_batches):
+            start = batch_idx * batch_size
+            end = min(start + batch_size, len(documents))
+
+            batch_docs = documents[start:end]
+            batch_ids = ids[start:end]
+            batch_metas = final_metadatas[start:end]
+            batch_embs = final_embeddings[start:end]
+
+            _p(f"[VectorStore] 写入第 {batch_idx + 1}/{total_batches} 批: {len(batch_docs)} 条 (IDs: {batch_ids[0]}...)")
+            t0 = time.time()
+            try:
+                collection.add(
+                    documents=batch_docs,
+                    ids=batch_ids,
+                    metadatas=batch_metas,
+                    embeddings=batch_embs,
+                )
+                _p(f"[VectorStore] 第 {batch_idx + 1}/{total_batches} 批写入完成 (耗时 {time.time()-t0:.3f}s)")
+            except Exception as e:
+                _p(f"[VectorStore] 第 {batch_idx + 1} 批写入失败: {e}")
+                import traceback
+                traceback.print_exc()
+                raise
+
+        _p(f"[VectorStore] 全部写入完成: 共 {len(documents)} 条 (总耗时 {time.time()-t_total:.3f}s)")
 
     def search(
         self,
@@ -194,8 +256,10 @@ class VectorStore:
         Returns:
             搜索结果字典，包含 ids、distances、documents、metadatas
         """
+        _p(f"[VectorStore] search: collection={collection_name}, query='{query[:50]}...', n_results={n_results}")
         collection = self.get_collection(collection_name)
         if collection is None:
+            _p(f"[VectorStore] 集合不存在: {collection_name}")
             return {
                 "ids": [[]],
                 "distances": [[]],
@@ -203,16 +267,27 @@ class VectorStore:
                 "metadatas": [[]],
             }
 
-        # 生成查询向量（使用 query 类型）
+        # 生成查询向量
+        _p(f"[VectorStore] 生成查询向量...")
         query_embedding = minimax_client.embed([query], embed_type="query")
+        if not query_embedding:
+            _p("[VectorStore] 查询向量生成失败")
+            return {
+                "ids": [[]],
+                "distances": [[]],
+                "documents": [[]],
+                "metadatas": [[]],
+            }
+        _p(f"[VectorStore] 查询向量生成完成")
 
-        # 执行搜索
+        _p(f"[VectorStore] 执行搜索...")
+        t0 = time.time()
         results = collection.query(
             query_embeddings=query_embedding,
             n_results=n_results,
             where=where,
         )
-
+        _p(f"[VectorStore] 搜索完成: {len(results.get('ids', [[]])[0])} 条结果 (耗时 {time.time()-t0:.3f}s)")
         return results
 
     def search_with_score(
@@ -223,44 +298,37 @@ class VectorStore:
         where: Optional[Dict[str, Any]] = None,
     ) -> List[Dict[str, Any]]:
         """
-        语义搜索，返回格式化的结果列表（带相似度分数）
+        语义搜索（带相似度分数，返回格式化列表）
 
         Args:
             collection_name: 集合名称
             query: 查询文本
             n_results: 返回结果数量
-            where: 过滤条件
+            where: 过滤条件（可选）
 
         Returns:
-            结果列表，每项包含 id、content、metadata、score（相似度 0-1）
+            [{content, metadata, score}, ...] 格式的结果列表
         """
-        results = self.search(
-            collection_name=collection_name,
-            query=query,
-            n_results=n_results,
-            where=where,
-        )
+        results = self.search(collection_name, query, n_results, where)
+
+        ids_list = results.get("ids", [[]])[0]
+        docs_list = results.get("documents", [[]])[0]
+        metas_list = results.get("metadatas", [[]])[0]
+        dist_list = results.get("distances", [[]])[0]
 
         formatted = []
-        if results.get("ids") and len(results["ids"]) > 0:
-            ids = results["ids"][0]
-            distances = results["distances"][0] if results.get("distances") else []
-            documents = results["documents"][0] if results.get("documents") else []
-            metadatas = results["metadatas"][0] if results.get("metadatas") else []
+        for i in range(len(ids_list)):
+            # ChromaDB 返回的是距离 (L2 或 cosine distance)，转为相似度分数
+            distance = dist_list[i] if i < len(dist_list) else 1.0
+            # 简单转换: score = 1 / (1 + distance)，范围 (0, 1]
+            score = 1.0 / (1.0 + distance) if distance >= 0 else 1.0
 
-            for i in range(len(ids)):
-                # ChromaDB 返回的是距离，转换为相似度分数
-                distance = distances[i] if i < len(distances) else 0
-                # 使用 1 / (1 + distance) 转换为 0-1 的相似度
-                score = 1.0 / (1.0 + distance) if distance >= 0 else 0.0
-
-                formatted.append({
-                    "id": ids[i],
-                    "content": documents[i] if i < len(documents) else "",
-                    "metadata": metadatas[i] if i < len(metadatas) else {},
-                    "score": round(score, 4),
-                    "distance": round(distance, 4),
-                })
+            formatted.append({
+                "id": ids_list[i] if i < len(ids_list) else "",
+                "content": docs_list[i] if i < len(docs_list) else "",
+                "metadata": metas_list[i] if i < len(metas_list) else {},
+                "score": score,
+            })
 
         return formatted
 
@@ -271,20 +339,22 @@ class VectorStore:
         where: Optional[Dict[str, Any]] = None,
     ) -> None:
         """
-        删除集合中的文档
+        从集合中删除文档
 
         Args:
             collection_name: 集合名称
-            ids: 要删除的文档 ID 列表
-            where: 按条件删除
+            ids: 要删除的文档 ID 列表（与 where 二选一）
+            where: 过滤条件（与 ids 二选一）
         """
         collection = self.get_collection(collection_name)
         if collection is None:
             return
 
         if ids:
+            _p(f"[VectorStore] 删除文档: {len(ids)} 条 (by ids)")
             collection.delete(ids=ids)
         elif where:
+            _p(f"[VectorStore] 删除文档: by where={where}")
             collection.delete(where=where)
 
     def count_documents(self, collection_name: str) -> int:
@@ -303,5 +373,5 @@ class VectorStore:
         return collection.count()
 
 
-# 全局向量存储实例
+# 全局单例
 vector_store = VectorStore()

@@ -396,16 +396,16 @@ class ObsidianReader:
             "last_sync_time": time.time(),
         }
 
-        logger.info(f"[Obsidian] 开始同步 user_id={user_id}, vault={self.vault_path}")
+        print(f"[Obsidian] 开始同步 user_id={user_id}, vault={self.vault_path}", flush=True)
 
         # 检查 Vault 路径
         if not self.vault_path.exists():
-            logger.error(f"[Obsidian] Vault 路径不存在: {self.vault_path}")
+            print(f"[Obsidian] Vault 路径不存在: {self.vault_path}", flush=True)
             result["errors"] = 1
             return result
 
         collection_name = self._get_collection_name(user_id)
-        logger.info(f"[Obsidian] 集合名: {collection_name}")
+        print(f"[Obsidian] 集合名: {collection_name}", flush=True)
 
         # 加载上次同步状态
         sync_state = self._load_sync_state()
@@ -415,7 +415,7 @@ class ObsidianReader:
         # 扫描当前文件
         current_files = self.scan_files()
         result["total_files"] = len(current_files)
-        logger.info(f"[Obsidian] 扫描到 {len(current_files)} 个文件, 上次已同步 {len(old_files)} 个")
+        print(f"[Obsidian] 扫描到 {len(current_files)} 个文件, 上次已同步 {len(old_files)} 个", flush=True)
 
         # 构建当前文件的路径索引
         current_paths = {f["relative_path"]: f for f in current_files}
@@ -429,7 +429,7 @@ class ObsidianReader:
                 vector_store.delete_documents(collection_name, where=where)
                 result["deleted"] += 1
             except Exception as e:
-                logger.error(f"[Obsidian] 删除向量数据失败: {rel_path}, 错误: {e}")
+                print(f"[Obsidian] 删除向量数据失败: {rel_path}, 错误: {e}", flush=True)
                 result["errors"] += 1
 
         # 处理新增和修改的文件
@@ -470,7 +470,7 @@ class ObsidianReader:
                 if not chunks:
                     chunks = [note["content"]]
 
-                logger.info(f"[Obsidian] 正在向量化: {rel_path} ({len(chunks)} 个分块)")
+                print(f"[Obsidian] 正在向量化: {rel_path} ({len(chunks)} 个分块)", flush=True)
 
                 # 构建 ID 和元数据
                 chunk_ids = [f"obsidian_{user_id}_{self._path_to_id(rel_path)}_chunk_{i}" for i in range(len(chunks))]
@@ -492,7 +492,7 @@ class ObsidianReader:
                     metadatas=metadatas,
                 )
 
-                logger.info(f"[Obsidian] 完成向量化: {rel_path}")
+                print(f"[Obsidian] 完成向量化: {rel_path}", flush=True)
 
                 if is_new:
                     result["added"] += 1
@@ -500,8 +500,8 @@ class ObsidianReader:
                     result["updated"] += 1
 
             except Exception as e:
-                logger.error(f"[Obsidian] 处理文件失败: {rel_path}, 错误: {e}")
-                logger.error(traceback.format_exc())
+                print(f"[Obsidian] 处理文件失败: {rel_path}, 错误: {e}", flush=True)
+                print(traceback.format_exc(), flush=True)
                 result["errors"] += 1
                 new_files_state[rel_path]["indexed"] = False
 
