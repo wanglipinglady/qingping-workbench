@@ -212,12 +212,19 @@ class MiniMaxClient:
         Raises:
             Exception: API 调用失败时抛出
         """
+        import logging as _log
+        _logger = _log.getLogger(__name__)
+
         if not texts:
+            _logger.warning("[MiniMax Embedding] 空输入，返回空列表")
             return []
+
+        use_model = model or self.embedding_model
+        _logger.info(f"[MiniMax Embedding] 开始向量化: {len(texts)} 段文本, model={use_model}")
 
         url = f"{self.base_url}/embeddings"
         payload = {
-            "model": model or self.embedding_model,
+            "model": use_model,
             "texts": texts,
         }
         payload.update(kwargs)
@@ -227,6 +234,15 @@ class MiniMaxClient:
                 "POST", url, headers=self._headers, json=payload
             )
             result = response.json()
+            _logger.info(f"[MiniMax Embedding] API 响应 keys: {list(result.keys())}")
+
+            # 检查 API 错误
+            if "base_resp" in result:
+                status_code = result["base_resp"].get("status_code")
+                status_msg = result["base_resp"].get("status_msg")
+                if status_code and status_code != 0:
+                    raise Exception(f"MiniMax API 错误: code={status_code}, msg={status_msg}")
+
             # 解析向量结果
             # 不同 API 返回格式可能略有不同，此处做兼容处理
             if "data" in result:
@@ -234,13 +250,22 @@ class MiniMaxClient:
                 for item in result["data"]:
                     if "embedding" in item:
                         embeddings.append(item["embedding"])
+                _logger.info(f"[MiniMax Embedding] 从 data 解析到 {len(embeddings)} 个向量")
+                if not embeddings:
+                    raise Exception(f"Embedding 响应 data 为空: {result}")
                 return embeddings
             elif "vectors" in result:
-                return result["vectors"]
+                vectors = result["vectors"]
+                _logger.info(f"[MiniMax Embedding] 从 vectors 解析到 {len(vectors)} 个向量")
+                return vectors
             else:
                 raise Exception(f"无法解析 Embedding 响应: {result}")
         except requests.RequestException as e:
+            _logger.error(f"[MiniMax Embedding] 网络请求失败: {e}")
             raise Exception(f"MiniMax Embedding API 调用失败: {e}") from e
+        except Exception as e:
+            _logger.error(f"[MiniMax Embedding] 失败: {e}")
+            raise
 
     def get_chat_reply(
         self,
