@@ -196,6 +196,7 @@ class MiniMaxClient:
         self,
         texts: List[str],
         model: Optional[str] = None,
+        embed_type: str = "db",
         **kwargs,
     ) -> List[List[float]]:
         """
@@ -204,6 +205,7 @@ class MiniMaxClient:
         Args:
             texts: 待向量化的文本列表
             model: Embedding 模型名称，默认使用配置的模型
+            embed_type: 向量类型，"db" 用于构建向量库（被检索文本），"query" 用于查询
             **kwargs: 其他参数
 
         Returns:
@@ -220,12 +222,13 @@ class MiniMaxClient:
             return []
 
         use_model = model or self.embedding_model
-        _logger.info(f"[MiniMax Embedding] 开始向量化: {len(texts)} 段文本, model={use_model}")
+        _logger.info(f"[MiniMax Embedding] 开始向量化: {len(texts)} 段文本, model={use_model}, type={embed_type}")
 
         url = f"{self.base_url}/embeddings"
         payload = {
             "model": use_model,
             "texts": texts,
+            "type": embed_type,  # MiniMax API 必填参数: "db" 或 "query"
         }
         payload.update(kwargs)
 

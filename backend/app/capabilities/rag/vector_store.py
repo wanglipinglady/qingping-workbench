@@ -188,8 +188,8 @@ class VectorStore:
                 "metadatas": [[]],
             }
 
-        # 生成查询向量
-        query_embedding = minimax_client.embed([query])
+        # 生成查询向量（使用 query 类型）
+        query_embedding = minimax_client.embed([query], embed_type="query")
 
         # 执行搜索
         results = collection.query(
