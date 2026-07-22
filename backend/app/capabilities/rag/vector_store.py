@@ -57,9 +57,22 @@ class VectorStore:
         # 使用 get_or_create 避免重复创建
         # 注意：ChromaDB 新版本（Python 3.13 下）不允许 metadata 为空字典
         # 必须传入 None 或非空字典
+        # 同时必须指定 embedding_function，否则 ChromaDB 会尝试加载默认的
+        # ONNXMiniLM_L6_V2，它依赖 onnxruntime（在 Python 3.13 下有 DLL 问题）
+        # 我们始终使用 MiniMax API 生成向量，所以这里传一个空函数即可
+        from chromadb.api.types import EmbeddingFunction, Documents, Embeddings
+
+        class NoOpEmbeddingFunction(EmbeddingFunction):
+            """空实现的 Embedding 函数，我们始终自己传 embeddings"""
+
+            def __call__(self, input: Documents) -> Embeddings:
+                # 这个函数理论上不会被调用，因为我们总是传 embeddings
+                raise RuntimeError("ChromaDB 不应该调用这个函数，因为我们总是传 embeddings")
+
         collection = self.client.get_or_create_collection(
             name=name,
             metadata=metadata if metadata else None,
+            embedding_function=NoOpEmbeddingFunction(),
         )
         return collection
 
