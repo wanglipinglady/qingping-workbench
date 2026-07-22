@@ -21,6 +21,10 @@ from app.plugins.wechat_writer.schemas import (
     StateTransitionRequest,
     StateResponse,
     MessageResponse,
+    MaterialResponse,
+    MaterialCreateRequest,
+    MaterialUpdateRequest,
+    MaterialParseRequest,
 )
 from app.plugins.wechat_writer.service import wechat_writer_service
 from app.plugins.wechat_writer.obsidian_reader import obsidian_reader
@@ -222,7 +226,78 @@ async def list_materials(
 ):
     """获取会话的资料卡片列表"""
     items = wechat_writer_service.get_materials(db, current_user.id, session_id, source_type, is_useful)
-    return unified_response(data=[i.__dict__ for i in items])
+    return unified_response(data=[MaterialResponse.model_validate(m).model_dump() for m in items])
+
+
+@router.post("/sessions/{session_id}/materials", summary="创建资料卡片")
+async def create_material(
+    session_id: int,
+    request: MaterialCreateRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """手动创建一条资料卡片"""
+    material = wechat_writer_service.create_material(
+        db, current_user.id, session_id,
+        source_type=request.source_type,
+        title=request.title,
+        url=request.url,
+        core_idea=request.core_idea,
+        useful_snippets=request.useful_snippets,
+        credibility_score=request.credibility_score,
+        suggested_usage=request.suggested_usage,
+        tags=request.tags,
+    )
+    return unified_response(data=MaterialResponse.model_validate(material).model_dump())
+
+
+@router.put("/materials/{material_id}", summary="更新资料卡片")
+async def update_material(
+    material_id: int,
+    request: MaterialUpdateRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """更新资料卡片（标记有用/无用、编辑标签、调整可信度）"""
+    material = wechat_writer_service.update_material(
+        db, current_user.id, material_id,
+        is_useful=request.is_useful,
+        tags=request.tags,
+        credibility_score=request.credibility_score,
+    )
+    return unified_response(data=MaterialResponse.model_validate(material).model_dump())
+
+
+@router.delete("/materials/{material_id}", summary="删除资料卡片")
+async def delete_material(
+    material_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """删除一条资料卡片"""
+    wechat_writer_service.delete_material(db, current_user.id, material_id)
+    return unified_response(message="删除成功")
+
+
+@router.post("/sessions/{session_id}/materials/parse", summary="从 AI 输出批量解析资料卡片")
+async def parse_materials(
+    session_id: int,
+    request: MaterialParseRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    从研究员的 AI 输出文本中解析资料卡片并批量保存
+
+    研究员生成的资料卡片格式：标题、来源、可信度、核心观点、可用片段等
+    """
+    materials = wechat_writer_service.parse_and_save_materials(
+        db, current_user.id, session_id, request.ai_output
+    )
+    return unified_response(
+        data=[MaterialResponse.model_validate(m).model_dump() for m in materials],
+        message=f"成功解析并保存 {len(materials)} 条资料卡片"
+    )
 
 
 # ========== 输出版本 ==========

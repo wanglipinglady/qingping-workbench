@@ -609,6 +609,156 @@ class WeChatWriterService:
             query = query.filter(WeChatWriterMaterial.is_useful == (1 if is_useful else 0))
         return query.order_by(WeChatWriterMaterial.created_at.desc()).all()
 
+    def create_material(
+        self, db: Session, user_id: int, session_id: int,
+        source_type: str, title: str,
+        url: Optional[str] = None, core_idea: Optional[str] = None,
+        useful_snippets: Optional[str] = None, credibility_score: int = 3,
+        suggested_usage: Optional[str] = None, tags: Optional[str] = None,
+    ) -> WeChatWriterMaterial:
+        """创建资料卡片"""
+        session = self.get_session(db, user_id, session_id)
+        material = WeChatWriterMaterial(
+            session_id=session.id,
+            source_type=source_type,
+            title=title,
+            url=url,
+            core_idea=core_idea,
+            useful_snippets=useful_snippets,
+            credibility_score=credibility_score,
+            suggested_usage=suggested_usage,
+            is_useful=1,
+            tags=tags,
+        )
+        db.add(material)
+        db.commit()
+        db.refresh(material)
+        print(f"[Material] 创建资料卡片: id={material.id}, title={title}")
+        return material
+
+    def update_material(
+        self, db: Session, user_id: int, material_id: int,
+        is_useful: Optional[bool] = None, tags: Optional[str] = None,
+        credibility_score: Optional[int] = None,
+    ) -> WeChatWriterMaterial:
+        """更新资料卡片"""
+        material = (
+            db.query(WeChatWriterMaterial)
+            .join(WeChatWriterSession, WeChatWriterMaterial.session_id == WeChatWriterSession.id)
+            .filter(
+                WeChatWriterMaterial.id == material_id,
+                WeChatWriterSession.user_id == user_id,
+            )
+            .first()
+        )
+        if not material:
+            raise BusinessException("资料卡片不存在")
+
+        if is_useful is not None:
+            material.is_useful = 1 if is_useful else 0
+        if tags is not None:
+            material.tags = tags
+        if credibility_score is not None:
+            material.credibility_score = max(1, min(5, credibility_score))
+
+        db.commit()
+        db.refresh(material)
+        return material
+
+    def delete_material(self, db: Session, user_id: int, material_id: int) -> None:
+        """删除资料卡片"""
+        material = (
+            db.query(WeChatWriterMaterial)
+            .join(WeChatWriterSession, WeChatWriterMaterial.session_id == WeChatWriterSession.id)
+            .filter(
+                WeChatWriterMaterial.id == material_id,
+                WeChatWriterSession.user_id == user_id,
+            )
+            .first()
+        )
+        if not material:
+            raise BusinessException("资料卡片不存在")
+        db.delete(material)
+        db.commit()
+        print(f"[Material] 删除资料卡片: id={material_id}")
+
+    def parse_and_save_materials(
+        self, db: Session, user_id: int, session_id: int, ai_output: str,
+    ) -> List[WeChatWriterMaterial]:
+        """
+        从研究员的 AI 输出中解析资料卡片并批量保存
+
+        研究员的输出格式包含多个资料卡片，每个卡片有：
+        标题、来源、可信度、核心观点、可用片段、推荐使用位置
+        """
+        import re
+
+        if not ai_output or len(ai_output.strip()) == 0:
+            return []
+
+        saved_materials = []
+
+        # 尝试从 Markdown 中解析资料卡片
+        # 匹配模式：以 "##" 或 "###" 或 "---" 分隔的卡片，或 "资料" 开头的块
+        card_blocks = re.split(r"\n---+\n|\n#{2,3}\s*资料", ai_output, flags=re.IGNORECASE)
+
+        for block in card_blocks:
+            block = block.strip()
+            if len(block) < 20:
+                continue
+
+            # 提取字段
+            title_match = re.search(r"(?:标题|资料标题|📄)\s*[：:]\s*(.+?)(?:\n|$)", block)
+            source_match = re.search(r"(?:来源|出处|📁|url|路径)\s*[：:]\s*(.+?)(?:\n|$)", block, re.IGNORECASE)
+            credibility_match = re.search(r"(?:可信度|评分|🔍)\s*[：:]\s*(\d+)", block)
+            core_match = re.search(r"(?:核心观点|内容摘要|📝|摘要)\s*[：:]\s*(.+?)(?:\n\s*\n|$)", block, re.DOTALL)
+            snippet_match = re.search(r"(?:可用片段|关键内容|内容)\s*[：:]\s*(.+?)(?:\n\s*\n|$)", block, re.DOTALL)
+            usage_match = re.search(r"(?:推荐使用|使用场景|建议)\s*[：:]\s*(.+?)(?:\n|$)", block)
+
+            title = (title_match.group(1).strip() if title_match else None)
+            if not title:
+                # 尝试用第一行作为标题
+                first_line = block.split("\n")[0].strip()
+                if first_line and len(first_line) < 200:
+                    title = re.sub(r"^[#\-\s]+", "", first_line)[:100]
+
+            if not title or len(title) < 2:
+                continue
+
+            source_type = "web"
+            url = source_match.group(1).strip() if source_match else None
+            if url and ("obsidian" in url.lower() or ".md" in url.lower() or "/" in url):
+                source_type = "obsidian"
+
+            credibility = 3
+            if credibility_match:
+                try:
+                    credibility = max(1, min(5, int(credibility_match.group(1))))
+                except ValueError:
+                    pass
+
+            core_idea = core_match.group(1).strip() if core_match else None
+            useful_snippets = snippet_match.group(1).strip() if snippet_match else None
+            suggested_usage = usage_match.group(1).strip() if usage_match else None
+
+            try:
+                material = self.create_material(
+                    db, user_id, session_id,
+                    source_type=source_type,
+                    title=title,
+                    url=url,
+                    core_idea=core_idea,
+                    useful_snippets=useful_snippets,
+                    credibility_score=credibility,
+                    suggested_usage=suggested_usage,
+                )
+                saved_materials.append(material)
+            except Exception as e:
+                print(f"[Material] 解析保存失败: {e}, title={title}")
+
+        print(f"[Material] 从 AI 输出解析并保存了 {len(saved_materials)} 条资料卡片")
+        return saved_materials
+
     # ========== 输出版本（占位，T10 完善） ==========
 
     def get_outputs(

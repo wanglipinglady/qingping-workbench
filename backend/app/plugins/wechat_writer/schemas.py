@@ -128,6 +128,24 @@ class MaterialUpdateRequest(BaseModel):
     """更新资料卡片请求"""
     is_useful: Optional[bool] = None
     tags: Optional[str] = None
+    credibility_score: Optional[int] = None
+
+
+class MaterialCreateRequest(BaseModel):
+    """创建资料卡片请求"""
+    source_type: str = "obsidian"  # obsidian / knowledge_base / web
+    title: str
+    url: Optional[str] = None
+    core_idea: Optional[str] = None
+    useful_snippets: Optional[str] = None  # JSON 数组字符串
+    credibility_score: int = 3
+    suggested_usage: Optional[str] = None
+    tags: Optional[str] = None
+
+
+class MaterialParseRequest(BaseModel):
+    """从 AI 输出文本批量解析资料卡片请求"""
+    ai_output: str
 
 
 # ========== 输出版本相关 ==========
