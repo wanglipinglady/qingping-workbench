@@ -5,6 +5,7 @@
 import os
 import sys
 import time
+import threading
 from typing import List, Dict, Any, Optional
 
 import chromadb
@@ -12,6 +13,10 @@ from chromadb.config import Settings as ChromaSettings
 
 from app.core.config import settings
 from app.capabilities.llm.minimax_client import minimax_client
+
+
+# ChromaDB 单批次写入超时时间（秒）—— 防止 Python 3.13/Windows 下挂起
+CHROMA_BATCH_TIMEOUT = 30
 
 
 def _p(msg: str) -> None:
@@ -59,6 +64,51 @@ def _create_minimax_ef():
     return MiniMaxEmbeddingFunction()
 
 
+def _run_with_timeout(func, timeout: float, description: str = "operation"):
+    """
+    在独立线程中执行函数，超时则抛出异常。
+    跨平台兼容（Windows 不支持 signal.alarm）。
+
+    Args:
+        func: 要执行的函数（无参数）
+        timeout: 超时时间（秒）
+        description: 操作描述，用于错误信息
+
+    Returns:
+        func 的返回值
+
+    Raises:
+        TimeoutError: 超时
+        Exception: func 抛出的任何异常
+    """
+    result_container = {"result": None, "exception": None, "done": False}
+
+    def worker():
+        try:
+            result_container["result"] = func()
+        except Exception as e:
+            result_container["exception"] = e
+        finally:
+            result_container["done"] = True
+
+    thread = threading.Thread(target=worker, daemon=True)
+    thread.start()
+    thread.join(timeout=timeout)
+
+    if thread.is_alive():
+        # 超时了——线程还在跑，但我们不等了
+        raise TimeoutError(
+            f"ChromaDB 操作超时（{timeout}s）: {description}。"
+            f"这通常是 Python 版本（当前 {sys.version.split()[0]}）与 ChromaDB 不兼容导致。"
+            f"建议：1) 删除 data/chroma 目录后重试 2) 降级到 Python 3.10/3.11"
+        )
+
+    if result_container["exception"] is not None:
+        raise result_container["exception"]
+
+    return result_container["result"]
+
+
 class VectorStore:
     """
     ChromaDB 向量存储封装
@@ -77,6 +127,7 @@ class VectorStore:
         # 确保持久化目录存在
         os.makedirs(self.persist_dir, exist_ok=True)
         _p(f"[VectorStore] 初始化 ChromaDB 客户端, persist_dir={self.persist_dir}")
+        _p(f"[VectorStore] Python 版本: {sys.version.split()[0]}, ChromaDB 版本: {chromadb.__version__}")
 
         # 创建 ChromaDB 客户端（本地持久化模式）
         self.client = chromadb.PersistentClient(
@@ -86,7 +137,7 @@ class VectorStore:
                 allow_reset=False,
             ),
         )
-        _p(f"[VectorStore] ChromaDB 客户端已创建 (version={chromadb.__version__})")
+        _p(f"[VectorStore] ChromaDB 客户端已创建")
 
         # 缓存 embedding_function，避免每次创建集合都重新实例化
         self._ef = _create_minimax_ef()
@@ -205,10 +256,10 @@ class VectorStore:
         assert len(documents) == len(ids) == len(final_metadatas) == len(final_embeddings), \
             f"长度不一致: docs={len(documents)}, ids={len(ids)}, metas={len(final_metadatas)}, embs={len(final_embeddings)}"
 
-        # 4. 分批写入 ChromaDB
+        # 4. 分批写入 ChromaDB（带超时保护）
         _p(f"[VectorStore] 准备写入 ChromaDB: docs={len(documents)}, embeddings={len(final_embeddings)}, metadatas={len(final_metadatas)}")
         total_batches = (len(documents) + batch_size - 1) // batch_size
-        _p(f"[VectorStore] 共 {total_batches} 批, 每批最多 {batch_size} 条")
+        _p(f"[VectorStore] 共 {total_batches} 批, 每批最多 {batch_size} 条, 单批超时 {CHROMA_BATCH_TIMEOUT}s")
 
         for batch_idx in range(total_batches):
             start = batch_idx * batch_size
@@ -222,13 +273,24 @@ class VectorStore:
             _p(f"[VectorStore] 写入第 {batch_idx + 1}/{total_batches} 批: {len(batch_docs)} 条 (IDs: {batch_ids[0]}...)")
             t0 = time.time()
             try:
-                collection.add(
-                    documents=batch_docs,
-                    ids=batch_ids,
-                    metadatas=batch_metas,
-                    embeddings=batch_embs,
+                # 用超时保护调用 collection.add()
+                def _add_batch():
+                    collection.add(
+                        documents=batch_docs,
+                        ids=batch_ids,
+                        metadatas=batch_metas,
+                        embeddings=batch_embs,
+                    )
+
+                _run_with_timeout(
+                    _add_batch,
+                    timeout=CHROMA_BATCH_TIMEOUT,
+                    description=f"写入第 {batch_idx + 1}/{total_batches} 批 ({len(batch_docs)} 条)",
                 )
                 _p(f"[VectorStore] 第 {batch_idx + 1}/{total_batches} 批写入完成 (耗时 {time.time()-t0:.3f}s)")
+            except TimeoutError as e:
+                _p(f"[VectorStore] 第 {batch_idx + 1} 批写入超时: {e}")
+                raise
             except Exception as e:
                 _p(f"[VectorStore] 第 {batch_idx + 1} 批写入失败: {e}")
                 import traceback
