@@ -445,7 +445,8 @@ class WeChatWriterService:
     def confirm_state(self, db: Session, user_id: int, session_id: int) -> dict:
         """确认当前状态，进入下一步
 
-        如果当前是 topic_confirm，保存 confirmed_topic 并进入 research
+        如果当前是 topic_confirm，保存 confirmed_topic 并进入 research。
+        状态切换后自动触发下一状态的 AI 生成（与 start_topic_confirm 行为一致）。
         """
         session = self.get_session(db, user_id, session_id)
         sm = self._get_state_machine(session)
@@ -474,15 +475,82 @@ class WeChatWriterService:
         if sm.can_forward():
             from_state, to_state = sm.next_state()
             self._save_state_machine(db, session, sm)
-            return {
-                "from_state": from_state,
-                "to_state": to_state,
-                "message": f"已从「{STATE_LABELS.get(from_state, from_state)}」进入「{STATE_LABELS.get(to_state, to_state)}」",
-            }
+
+            # 切换状态后自动触发下一状态的 AI 生成
+            expert_type = get_expert_by_state(to_state)
+            response = ""
+
+            if expert_type:
+                print(f"[WeChatWriter] confirm 后自动触发 AI 生成, state={to_state}, expert={expert_type}")
+
+                # 构建 RAG 上下文（research/outline/draft 状态需要知识库资料）
+                rag_context = ""
+                if to_state in ("research", "outline", "draft"):
+                    queries = build_search_queries(session.topic, session.confirmed_topic)
+                    print(f"[RAG] 搜索关键词: {queries}")
+                    all_results = []
+                    for q in queries:
+                        try:
+                            results = obsidian_reader.search(user_id, q, top_k=5)
+                            all_results.extend(results)
+                        except Exception as e:
+                            print(f"[RAG] 搜索失败 query='{q}': {e}")
+                    if all_results:
+                        rag_context = format_rag_context(all_results, max_snippets=8)
+                        print(f"[RAG] 检索到 {len(all_results)} 条资料，已格式化注入上下文")
+
+                # 构建上下文
+                context = {}
+                if rag_context:
+                    context["rag_context"] = rag_context
+
+                # 获取历史消息
+                llm_messages = self._get_session_messages(db, session_id)
+
+                # 调用专家生成回复
+                try:
+                    response = sm.generate_expert_response(to_state, llm_messages, context)
+                except Exception as e:
+                    print(f"[WeChatWriter] AI 生成失败: {e}")
+                    response = f"（AI 生成失败：{e}）"
+
+                # 记录 assistant 消息
+                self._add_message(
+                    db, session_id, "assistant", response,
+                    expert_type=expert_type, state_label=to_state, iteration=sm.iteration,
+                )
+
+                # 保存输出版本
+                step = self._state_to_step(to_state)
+                content_type = self._state_to_content_type(to_state)
+                self._add_output(
+                    db, session_id, step=step, content_type=content_type,
+                    content=response, version=1,
+                )
+
+                # 保存状态机状态
+                self._save_state_machine(db, session, sm)
+
+                return {
+                    "from_state": from_state,
+                    "to_state": to_state,
+                    "expert": get_expert_name(expert_type),
+                    "response": response,
+                    "message": f"已从「{STATE_LABELS.get(from_state, from_state)}」进入「{STATE_LABELS.get(to_state, to_state)}」，{get_expert_name(expert_type)}已开始工作",
+                }
+            else:
+                # done 状态没有专家
+                return {
+                    "from_state": from_state,
+                    "to_state": to_state,
+                    "response": "",
+                    "message": f"已从「{STATE_LABELS.get(from_state, from_state)}」进入「{STATE_LABELS.get(to_state, to_state)}」",
+                }
         else:
             return {
                 "from_state": current_state,
                 "to_state": current_state,
+                "response": "",
                 "message": "已到达最终状态",
             }
 

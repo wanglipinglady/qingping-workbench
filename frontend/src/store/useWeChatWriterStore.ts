@@ -187,6 +187,7 @@ export const useWeChatWriterStore = create<WeChatWriterState & WeChatWriterActio
     try {
       await confirmState(sessionId);
       await get().fetchSession(sessionId);
+      await get().fetchOutputs(sessionId);
       set((state) => ({ loading: { ...state.loading, confirm: false } }));
     } catch (error) {
       set((state) => ({ loading: { ...state.loading, confirm: false } }));

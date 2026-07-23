@@ -89,10 +89,13 @@ export function startWriting(sessionId: number): Promise<{
 
 /**
  * 确认当前状态，进入下一步 - AI 长超时
+ * 确认后会自动触发下一状态的 AI 生成，返回 response 字段
  */
 export function confirmState(sessionId: number): Promise<{
   from_state: string;
   to_state: string;
+  expert?: string;
+  response: string;
   message: string;
 }> {
   return aiPost(`/wechat-writer/sessions/${sessionId}/confirm`);
