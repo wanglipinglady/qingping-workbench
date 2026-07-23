@@ -116,6 +116,16 @@ PAUSE_AFTER_STATES: set = {
 # 状态机类
 # =============================================================================
 
+# 各阶段最大输出 token 数（大纲、初稿需要更多空间）
+STATE_MAX_TOKENS: Dict[str, int] = {
+    WriterState.TOPIC_CONFIRM.value: 4096,
+    WriterState.RESEARCH.value: 4096,
+    WriterState.OUTLINE.value: 8192,
+    WriterState.DRAFT.value: 16384,
+    WriterState.POLISH.value: 16384,
+}
+
+
 class WeChatWriterStateMachine:
     """微信公众号写作助手状态机
 
@@ -374,8 +384,9 @@ class WeChatWriterStateMachine:
         # 添加历史消息
         full_messages.extend(messages)
 
-        # 调用 MiniMax
-        result = self.minimax_client.chat(full_messages)
+        # 调用 MiniMax（按阶段设置不同的 max_tokens）
+        max_tokens = STATE_MAX_TOKENS.get(state, 4096)
+        result = self.minimax_client.chat(full_messages, max_tokens=max_tokens)
         response = self._extract_content(result)
 
         # 缓存当前状态的输出
@@ -461,6 +472,9 @@ class WeChatWriterStateMachine:
 
         full_messages.extend(messages)
 
+        # 按阶段设置不同的 max_tokens
+        max_tokens = STATE_MAX_TOKENS.get(state, 4096)
+
         # 用线程执行同步生成器，再异步 yield 结果
         full_response = []
         loop = asyncio.get_event_loop()
@@ -468,7 +482,7 @@ class WeChatWriterStateMachine:
         def _collect_and_parse() -> list:
             """同步收集并解析所有流式数据"""
             chunks = []
-            for data_str in self.minimax_client.chat_stream(full_messages):
+            for data_str in self.minimax_client.chat_stream(full_messages, max_tokens=max_tokens):
                 try:
                     data = json.loads(data_str)
                     if "choices" in data and len(data["choices"]) > 0:
