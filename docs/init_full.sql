@@ -269,20 +269,101 @@ CREATE TABLE `wechat_writer_outputs` (
 -- 默认管理员用户
 -- 用户名: admin
 -- 密码: admin123
--- 注意: 此处使用 bcrypt 哈希值，首次部署时请确认与代码使用的 bcrypt 版本兼容
+-- 注意: 此处使用 bcrypt 哈希值（rounds=12），与 app/core/auth.py 中的 hash_password 一致
 INSERT INTO `users` (`username`, `email`, `hashed_password`, `avatar`) VALUES
 (
   'admin',
   'admin@qingping.local',
-  '$2b$12$KIXK10WcQe5J4b3dK2c8Ce0nYV7xQ6Z5V4zW3x2v1u0t9s8r7q6p5o4n3m2l1k0j',
+  '$2b$12$d8lEstvNGCDvuAEnZFRPN.EN/gnT5uZD1o7yEBsCJQe3h9UkkBW96',
   ''
 )
 ON DUPLICATE KEY UPDATE
   `email` = VALUES(`email`),
-  `avatar` = VALUES(`avatar`);
+  `avatar` = VALUES(`avatar`),
+  `hashed_password` = VALUES(`hashed_password`);
 
 -- ============================================
--- 13. 外键约束
+-- 12. 写作模板表 (wechat_writer_templates)
+-- ============================================
+-- 存储系统预设和用户自定义的写作模板
+
+DROP TABLE IF EXISTS `wechat_writer_templates`;
+CREATE TABLE `wechat_writer_templates` (
+  `id`                INT          NOT NULL AUTO_INCREMENT COMMENT '模板ID',
+  `name`              VARCHAR(200) NOT NULL COMMENT '模板名称',
+  `description`       TEXT         DEFAULT NULL COMMENT '模板描述',
+  `category`          VARCHAR(50)  NOT NULL DEFAULT 'custom' COMMENT '模板分类:干货/情感/热点/科普/教程/测评/复盘/其他/custom',
+  `icon`              VARCHAR(50)  DEFAULT '📝' COMMENT '模板图标（emoji）',
+  `topic_prompt`      TEXT         DEFAULT NULL COMMENT '选题阶段自定义 Prompt',
+  `research_prompt`   TEXT         DEFAULT NULL COMMENT '研究员自定义 Prompt',
+  `outline_prompt`    TEXT         DEFAULT NULL COMMENT '结构师自定义 Prompt',
+  `writer_prompt`     TEXT         DEFAULT NULL COMMENT '撰稿人自定义 Prompt',
+  `suggested_topics`  TEXT         DEFAULT NULL COMMENT '推荐主题（JSON 数组字符串）',
+  `default_style`     VARCHAR(200) DEFAULT NULL COMMENT '默认文章风格',
+  `default_audience`  VARCHAR(200) DEFAULT NULL COMMENT '默认目标读者',
+  `user_id`           INT          DEFAULT NULL COMMENT '创建者用户ID（NULL=系统预设）',
+  `is_public`         TINYINT(1)   NOT NULL DEFAULT 0 COMMENT '是否公开（1=公开，0=私有）',
+  `is_system`         TINYINT(1)   NOT NULL DEFAULT 0 COMMENT '是否系统预设（1=是，0=否）',
+  `use_count`         INT          NOT NULL DEFAULT 0 COMMENT '使用次数',
+  `sort_order`        INT          NOT NULL DEFAULT 0 COMMENT '排序（越小越靠前）',
+  `created_at`        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `updated_at`        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_category` (`category`),
+  KEY `idx_user_id` (`user_id`),
+  KEY `idx_is_system` (`is_system`),
+  KEY `idx_use_count` (`use_count`),
+  KEY `idx_sort_order` (`sort_order`),
+  KEY `idx_created_at` (`created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='写作模板表';
+
+-- ============================================
+-- 13. 初始数据（系统预设模板）
+-- ============================================
+
+-- 预设写作模板（is_system=1, user_id=NULL 表示系统预设）
+INSERT INTO `wechat_writer_templates`
+(`name`, `description`, `category`, `icon`, `topic_prompt`, `research_prompt`, `outline_prompt`, `writer_prompt`, `suggested_topics`, `default_style`, `default_audience`, `user_id`, `is_public`, `is_system`, `sort_order`)
+VALUES
+(
+  '深度科普文', '适合写技术科普类文章，结构清晰，逻辑严谨，用通俗易懂的语言解释专业概念',
+  '科普', '🔬',
+  '请分析以下主题的科普价值和读者兴趣点，找出最适合普通读者理解的切入角度',
+  '请搜集该领域的最新研究成果和权威数据，优先选择近3年的资料',
+  '请按照：背景引入 → 核心原理 → 实际应用 → 未来展望 的结构设计大纲，每个部分给出2-3个要点',
+  '请用通俗易懂的语言撰写，避免过多专业术语，必要时用比喻解释。每个段落控制在3-5句话',
+  '["量子计算入门指南","区块链原理解析","基因编辑技术科普","人工智能发展简史"]',
+  '通俗易懂、逻辑清晰、例证丰富',
+  '对科技感兴趣的普通读者',
+  NULL, 1, 1, 1
+),
+(
+  '干货实用文', '适合写方法技巧、经验分享类文章，强调实用性和可操作性',
+  '干货', '💡',
+  '请分析目标读者的核心痛点和最迫切需要解决的问题',
+  '请搜集经过验证的有效方法、权威建议和真实案例',
+  '请按照：问题提出 → 方法步骤 → 注意事项 → 案例佐证 的结构设计大纲',
+  '请用步骤化的方式写作，每一步给出具体操作方法。多用列表和编号，方便读者快速获取信息',
+  '["如何提高写作效率","职场沟通技巧大全","个人知识管理方法","时间管理实用指南"]',
+  '条理清晰、步骤明确、实用性强',
+  '希望快速提升技能的职场人士',
+  NULL, 1, 1, 2
+),
+(
+  '观点评论文', '适合写热点评论、观点分析类文章，有鲜明的立场和论证',
+  '热点', '💬',
+  '请分析该话题的争议点和不同立场，找出最有价值的评论角度',
+  '请搜集正反两方面的论据、数据和案例，确保论证全面',
+  '请按照：现象描述 → 观点提出 → 多方论证 → 总结建议 的结构设计大纲',
+  '请用论证性的语言写作，观点鲜明但不偏激，用数据和案例支撑论点。避免情绪化表达',
+  '["当前热点事件评论","行业趋势深度分析","产品功能对比评测","社会现象观察"]',
+  '观点鲜明、论证充分、客观理性',
+  '关注行业动态和社会热点的读者',
+  NULL, 1, 1, 3
+);
+
+-- ============================================
+-- 14. 外键约束
 -- ============================================
 
 -- 知识库 -> 用户
@@ -339,7 +420,7 @@ SET FOREIGN_KEY_CHECKS = 1;
 --   用户名: admin
 --   密码: admin123
 --
--- 数据表清单（共 11 张）:
+-- 数据表清单（共 12 张）:
 --   1. users                        - 用户表
 --   2. knowledge_bases              - 知识库表
 --   3. documents                    - 文档表
@@ -350,6 +431,7 @@ SET FOREIGN_KEY_CHECKS = 1;
 --   8. wechat_writer_materials     - 资料卡片表
 --   9. wechat_writer_messages      - 写作消息记录表
 --  10. wechat_writer_outputs       - 输出版本表
+--  11. wechat_writer_templates     - 写作模板表
 --
 -- 注意:
 --   1. 首次登录后请立即修改默认密码！
