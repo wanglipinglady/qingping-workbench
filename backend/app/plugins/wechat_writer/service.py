@@ -170,19 +170,50 @@ class WeChatWriterService:
         db.refresh(output)
         return output
 
-    def _get_session_messages(self, db: Session, session_id: int) -> List[dict]:
-        """获取会话的历史消息（用于构建 LLM 上下文）"""
+    # 状态顺序定义（用于消息过滤）
+    _STATE_ORDER = [
+        "idle", "topic_confirm", "research", "outline", "draft", "polish", "done"
+    ]
+
+    def _get_state_order_index(self, state: str) -> int:
+        """获取状态在流程中的顺序索引"""
+        try:
+            return self._STATE_ORDER.index(state)
+        except ValueError:
+            return 0
+
+    def _get_session_messages(
+        self, db: Session, session_id: int,
+        current_state: Optional[str] = None,
+    ) -> List[dict]:
+        """获取会话的历史消息（用于构建 LLM 上下文）
+
+        Args:
+            session_id: 会话 ID
+            current_state: 当前状态，用于过滤只返回当前及之前状态的消息
+                          如果为 None，则返回所有消息（向后兼容）
+        """
         messages = (
             db.query(WeChatWriterMessage)
             .filter(WeChatWriterMessage.session_id == session_id)
             .order_by(WeChatWriterMessage.created_at.asc())
             .all()
         )
-        # 只返回 user/assistant 消息给 LLM
+
+        # 计算当前状态在流程中的位置
+        current_idx = self._get_state_order_index(current_state) if current_state else len(self._STATE_ORDER) - 1
+
+        # 只返回 user/assistant 消息给 LLM，且只包含当前状态及之前状态的消息
         llm_messages = []
         for msg in messages:
-            if msg.role in ("user", "assistant"):
-                llm_messages.append({"role": msg.role, "content": msg.content})
+            if msg.role not in ("user", "assistant"):
+                continue
+            if current_state and msg.state_label:
+                msg_state_idx = self._get_state_order_index(msg.state_label)
+                # 跳过当前状态之后的消息（防止回退后旧消息污染上下文）
+                if msg_state_idx > current_idx:
+                    continue
+            llm_messages.append({"role": msg.role, "content": msg.content})
         return llm_messages
 
     def start_topic_confirm(self, db: Session, user_id: int, session_id: int) -> dict:
@@ -288,6 +319,10 @@ class WeChatWriterService:
 
         # 构建上下文
         context = {}
+        if sm.iteration > 1:
+            context["is_rollback"] = True
+            context["from_state"] = current_state
+            context["reason"] = "用户回退后重新生成"
         if rag_context:
             context["rag_context"] = rag_context
         if feedback:
@@ -301,8 +336,8 @@ class WeChatWriterService:
                 expert_type=None, state_label=current_state, iteration=sm.iteration,
             )
 
-        # 获取历史消息
-        llm_messages = self._get_session_messages(db, session_id)
+        # 获取历史消息（只包含当前状态及之前状态的消息，防止回退后旧消息污染）
+        llm_messages = self._get_session_messages(db, session_id, current_state=current_state)
 
         # 调用专家生成回复
         response = sm.generate_expert_response(current_state, llm_messages, context)
@@ -381,6 +416,10 @@ class WeChatWriterService:
                 rag_context = format_rag_context(all_results, max_snippets=8)
 
         context = {}
+        if sm.iteration > 1:
+            context["is_rollback"] = True
+            context["from_state"] = current_state
+            context["reason"] = "用户回退后重新生成"
         if rag_context:
             context["rag_context"] = rag_context
         if feedback:
@@ -394,8 +433,8 @@ class WeChatWriterService:
                 expert_type=None, state_label=current_state, iteration=sm.iteration,
             )
 
-        # 获取历史消息
-        llm_messages = self._get_session_messages(db, session_id)
+        # 获取历史消息（只包含当前状态及之前状态的消息，防止回退后旧消息污染）
+        llm_messages = self._get_session_messages(db, session_id, current_state=current_state)
 
         # 流式调用专家
         full_content_parts = []
@@ -501,11 +540,19 @@ class WeChatWriterService:
 
                 # 构建上下文
                 context = {}
+
+                # 检测是否是回退后的重新生成（iteration > 1 说明之前有过回退）
+                if sm.iteration > 1:
+                    context["is_rollback"] = True
+                    context["from_state"] = from_state
+                    context["reason"] = "用户回退后重新进入此状态"
+                    print(f"[WeChatWriter] 检测到回退后的重新生成, iteration={sm.iteration}")
+
                 if rag_context:
                     context["rag_context"] = rag_context
 
-                # 获取历史消息
-                llm_messages = self._get_session_messages(db, session_id)
+                # 获取历史消息（只包含目标状态及之前状态的消息，防止回退后旧消息污染）
+                llm_messages = self._get_session_messages(db, session_id, current_state=to_state)
 
                 # 调用专家生成回复
                 try:
@@ -581,8 +628,8 @@ class WeChatWriterService:
             expert_type=None, state_label=current_state, iteration=sm.iteration,
         )
 
-        # 获取历史消息
-        llm_messages = self._get_session_messages(db, session_id)
+        # 获取历史消息（只包含当前状态及之前状态的消息，防止回退后旧消息污染）
+        llm_messages = self._get_session_messages(db, session_id, current_state=current_state)
 
         # 调用专家（带重新生成上下文）
         context = {"is_regenerate": True, "feedback": feedback}
@@ -623,12 +670,27 @@ class WeChatWriterService:
         }
 
     def rollback(self, db: Session, user_id: int, session_id: int, target_state: str, reason: str = "") -> dict:
-        """回退到指定状态"""
+        """回退到指定状态
+
+        回退后：
+        1. 状态机状态更新为 target_state，iteration +1
+        2. 添加一条系统消息记录回退事件
+        3. 后续 confirm/generate 时只使用 target_state 及之前状态的消息
+        """
         session = self.get_session(db, user_id, session_id)
         sm = self._get_state_machine(session)
 
         from_state, to_state = sm.rollback_to(target_state, reason)
         self._save_state_machine(db, session, sm)
+
+        # 记录回退事件为系统消息（state_label 设为目标状态，便于消息过滤）
+        rollback_msg = f"[系统] 用户从「{STATE_LABELS.get(from_state, from_state)}」回退到「{STATE_LABELS.get(to_state, to_state)}」"
+        if reason:
+            rollback_msg += f"，原因：{reason}"
+        self._add_message(
+            db, session_id, "user", rollback_msg,
+            expert_type=None, state_label=to_state, iteration=sm.iteration,
+        )
 
         return {
             "from_state": from_state,
