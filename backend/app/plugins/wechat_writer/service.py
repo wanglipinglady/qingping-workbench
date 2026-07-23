@@ -853,31 +853,34 @@ class WeChatWriterService:
         - outline:  选题确认单 + 资料卡片
         - draft:    选题确认单 + 资料卡片 + 大纲
         - polish:   选题确认单 + 资料卡片 + 大纲 + 初稿
+
+        注意：所有内容都从 WeChatWriterOutput 表获取（按 step 查询最新版本），
+        不从 WeChatWriterMaterial 表查询（该表仅用于手动管理的资料卡片）。
         """
         context = {}
 
         # 选题确认单（所有阶段都需要）
-        confirmed_topic = self._get_latest_output(db, session_id, "topic")
-        if confirmed_topic:
-            context["topic_analysis"] = confirmed_topic
+        topic_output = self._get_latest_output(db, session_id, "topic")
+        if topic_output:
+            context["topic_analysis"] = topic_output
 
         if state in ("outline", "draft", "polish"):
-            # 资料卡片
-            materials_text = self._get_session_materials_text(db, session_id)
-            if materials_text:
-                context["materials"] = materials_text
+            # 资料卡片：从输出表获取（step="research"）
+            research_output = self._get_latest_output(db, session_id, "research")
+            if research_output:
+                context["materials"] = research_output
 
         if state in ("draft", "polish"):
             # 大纲
-            outline = self._get_latest_output(db, session_id, "outline")
-            if outline:
-                context["outline"] = outline
+            outline_output = self._get_latest_output(db, session_id, "outline")
+            if outline_output:
+                context["outline"] = outline_output
 
         if state == "polish":
             # 初稿
-            draft = self._get_latest_output(db, session_id, "draft")
-            if draft:
-                context["draft_content"] = draft
+            draft_output = self._get_latest_output(db, session_id, "draft")
+            if draft_output:
+                context["draft_content"] = draft_output
 
         return context
 
