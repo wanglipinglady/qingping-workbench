@@ -358,11 +358,31 @@ export default function WeChatWriter() {
 
               {currentSession.current_state === 'done' && (
                 <div className="bg-white border-t border-gray-100 px-6 py-4">
-                  <div className="flex items-center justify-center max-w-4xl mx-auto gap-4">
-                    <div className="text-green-600 font-medium">🎉 写作已完成！</div>
-                    <Button variant="secondary" size="sm" onClick={() => handleExport('markdown')}>
-                      导出文章
-                    </Button>
+                  <div className="flex items-center justify-between max-w-4xl mx-auto">
+                    <div className="flex items-center gap-3">
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => setShowRegenerateModal(true)}
+                        loading={loading.regenerate}
+                      >
+                        🔄 重新生成
+                      </Button>
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => setShowRollbackModal(true)}
+                        loading={loading.rollback}
+                      >
+                        ↩️ 回退
+                      </Button>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <div className="text-green-600 font-medium">🎉 写作已完成！</div>
+                      <Button variant="primary" size="md" onClick={() => handleExport('markdown')}>
+                        导出文章
+                      </Button>
+                    </div>
                   </div>
                 </div>
               )}

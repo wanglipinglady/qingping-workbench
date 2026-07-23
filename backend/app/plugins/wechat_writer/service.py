@@ -188,10 +188,18 @@ class WeChatWriterService:
     ) -> List[dict]:
         """获取会话的历史消息（用于构建 LLM 上下文）
 
+        关键设计：只保留当前阶段的消息 + 之前阶段的 user 反馈消息。
+        之前阶段的 assistant 长输出（选题分析、资料卡片、大纲、初稿等）
+        已通过 `_build_stage_context` 注入为结构化 system 消息，不需要
+        在历史消息中重复，否则会导致：
+        1. 上下文冗余，token 浪费
+        2. AI 注意力被之前阶段的长输出淹没，忘记当前角色
+        3. 每个阶段输出趋同（看起来像上一阶段的延续）
+
         Args:
             session_id: 会话 ID
-            current_state: 当前状态，用于过滤只返回当前及之前状态的消息
-                          如果为 None，则返回所有消息（向后兼容）
+            current_state: 当前状态，用于过滤消息
+                          如果为 None，则返回所有 user/assistant 消息（向后兼容）
         """
         messages = (
             db.query(WeChatWriterMessage)
@@ -203,17 +211,39 @@ class WeChatWriterService:
         # 计算当前状态在流程中的位置
         current_idx = self._get_state_order_index(current_state) if current_state else len(self._STATE_ORDER) - 1
 
-        # 只返回 user/assistant 消息给 LLM，且只包含当前状态及之前状态的消息
         llm_messages = []
         for msg in messages:
             if msg.role not in ("user", "assistant"):
                 continue
-            if current_state and msg.state_label:
-                msg_state_idx = self._get_state_order_index(msg.state_label)
-                # 跳过当前状态之后的消息（防止回退后旧消息污染上下文）
-                if msg_state_idx > current_idx:
-                    continue
-            llm_messages.append({"role": msg.role, "content": msg.content})
+
+            # 无状态标签的消息（兼容性处理）
+            if msg.state_label is None:
+                llm_messages.append({"role": msg.role, "content": msg.content})
+                continue
+
+            msg_state_idx = self._get_state_order_index(msg.state_label)
+
+            # 跳过未来状态的消息（防止回退后旧消息污染）
+            if msg_state_idx > current_idx:
+                continue
+
+            if msg_state_idx < current_idx:
+                # 之前阶段的消息：只保留 user 消息（用户的反馈/修改建议）
+                # 之前阶段的 assistant 长输出已通过 _build_stage_context 注入，不再重复
+                if msg.role == "user":
+                    llm_messages.append({
+                        "role": "user",
+                        "content": f"[阶段：{msg.state_label}] {msg.content}",
+                    })
+            else:
+                # 当前阶段的消息：user 和 assistant 都保留
+                # 添加阶段标签帮助 AI 理解上下文
+                label_prefix = f"[阶段：{msg.state_label}] " if msg.state_label else ""
+                llm_messages.append({
+                    "role": msg.role,
+                    "content": f"{label_prefix}{msg.content}",
+                })
+
         return llm_messages
 
     def start_topic_confirm(self, db: Session, user_id: int, session_id: int) -> dict:
