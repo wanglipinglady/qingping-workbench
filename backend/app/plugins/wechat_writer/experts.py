@@ -13,6 +13,7 @@ class ExpertType(str, Enum):
     RESEARCHER = "researcher"         # 研究员
     OUTLINER = "outliner"             # 结构师
     WRITER = "writer"                 # 撰稿人
+    POLISHER = "polisher"             # 润色师
 
 
 # 状态与专家的映射关系
@@ -21,7 +22,7 @@ STATE_TO_EXPERT: Dict[str, str] = {
     "research": ExpertType.RESEARCHER.value,
     "outline": ExpertType.OUTLINER.value,
     "draft": ExpertType.WRITER.value,
-    "polish": ExpertType.WRITER.value,
+    "polish": ExpertType.POLISHER.value,
 }
 
 
@@ -56,8 +57,16 @@ EXPERT_CONFIG: Dict[str, Dict[str, Any]] = {
         "name_en": "Writer",
         "state": "draft",
         "color": "#7a6b9d",  # 紫色系
-        "description": "根据大纲和资料撰写完整文章，并进行润色优化",
+        "description": "根据大纲和资料撰写完整文章",
         "prompt_key": "WRITER_SYSTEM_PROMPT",
+    },
+    ExpertType.POLISHER.value: {
+        "name": "润色师",
+        "name_en": "Polisher",
+        "state": "polish",
+        "color": "#b85450",  # 酒红色系
+        "description": "对初稿进行润色优化，提升文章质感和传播力",
+        "prompt_key": "POLISHER_SYSTEM_PROMPT",
     },
 }
 

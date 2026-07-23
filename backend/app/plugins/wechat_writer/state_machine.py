@@ -348,6 +348,29 @@ class WeChatWriterStateMachine:
             if rag_text and len(rag_text.strip()) > 0:
                 full_messages.append({"role": "system", "content": rag_text})
 
+        # 注入前置阶段内容（选题确认单/资料卡片/大纲/初稿）
+        if context:
+            if context.get("topic_analysis"):
+                full_messages.append({
+                    "role": "system",
+                    "content": f"【选题确认单】\n{context['topic_analysis']}"
+                })
+            if context.get("materials"):
+                full_messages.append({
+                    "role": "system",
+                    "content": f"【资料卡片】\n{context['materials']}"
+                })
+            if context.get("outline"):
+                full_messages.append({
+                    "role": "system",
+                    "content": f"【文章大纲】\n{context['outline']}"
+                })
+            if context.get("draft_content"):
+                full_messages.append({
+                    "role": "system",
+                    "content": f"【初稿全文】\n{context['draft_content']}"
+                })
+
         # 添加历史消息
         full_messages.extend(messages)
 
@@ -412,6 +435,29 @@ class WeChatWriterStateMachine:
             rag_text = context["rag_context"]
             if rag_text and len(rag_text.strip()) > 0:
                 full_messages.append({"role": "system", "content": rag_text})
+
+        # 注入前置阶段内容（选题确认单/资料卡片/大纲/初稿）
+        if context:
+            if context.get("topic_analysis"):
+                full_messages.append({
+                    "role": "system",
+                    "content": f"【选题确认单】\n{context['topic_analysis']}"
+                })
+            if context.get("materials"):
+                full_messages.append({
+                    "role": "system",
+                    "content": f"【资料卡片】\n{context['materials']}"
+                })
+            if context.get("outline"):
+                full_messages.append({
+                    "role": "system",
+                    "content": f"【文章大纲】\n{context['outline']}"
+                })
+            if context.get("draft_content"):
+                full_messages.append({
+                    "role": "system",
+                    "content": f"【初稿全文】\n{context['draft_content']}"
+                })
 
         full_messages.extend(messages)
 

@@ -304,18 +304,9 @@ class WeChatWriterService:
         # 构建 RAG 上下文（research/outline/draft 状态需要知识库资料）
         rag_context = ""
         if current_state in ("research", "outline", "draft"):
-            queries = build_search_queries(session.topic, session.confirmed_topic)
-            print(f"[RAG] 搜索关键词: {queries}")
-            all_results = []
-            for q in queries:
-                try:
-                    results = obsidian_reader.search(user_id, q, top_k=5)
-                    all_results.extend(results)
-                except Exception as e:
-                    print(f"[RAG] 搜索失败 query='{q}': {e}")
-            if all_results:
-                rag_context = format_rag_context(all_results, max_snippets=8)
-                print(f"[RAG] 检索到 {len(all_results)} 条资料，已格式化注入上下文")
+            rag_context = self._build_rag_context(
+                user_id, session.topic, session.confirmed_topic
+            )
 
         # 构建上下文
         context = {}
@@ -328,6 +319,12 @@ class WeChatWriterService:
         if feedback:
             context["is_regenerate"] = True
             context["feedback"] = feedback
+
+        # 注入前置阶段内容（选题确认单/资料卡片/大纲/初稿）
+        stage_context = self._build_stage_context(db, session_id, current_state)
+        context.update(stage_context)
+        if stage_context:
+            print(f"[WeChatWriter] 注入阶段上下文: {list(stage_context.keys())}")
 
         # 记录用户消息（如果有反馈）
         if feedback:
@@ -404,16 +401,9 @@ class WeChatWriterService:
         # 构建 RAG 上下文
         rag_context = ""
         if current_state in ("research", "outline", "draft"):
-            queries = build_search_queries(session.topic, session.confirmed_topic)
-            all_results = []
-            for q in queries:
-                try:
-                    results = obsidian_reader.search(user_id, q, top_k=5)
-                    all_results.extend(results)
-                except Exception as e:
-                    print(f"[RAG] 搜索失败 query='{q}': {e}")
-            if all_results:
-                rag_context = format_rag_context(all_results, max_snippets=8)
+            rag_context = self._build_rag_context(
+                user_id, session.topic, session.confirmed_topic
+            )
 
         context = {}
         if sm.iteration > 1:
@@ -425,6 +415,12 @@ class WeChatWriterService:
         if feedback:
             context["is_regenerate"] = True
             context["feedback"] = feedback
+
+        # 注入前置阶段内容（选题确认单/资料卡片/大纲/初稿）
+        stage_context = self._build_stage_context(db, session_id, current_state)
+        context.update(stage_context)
+        if stage_context:
+            print(f"[WeChatWriter] 注入阶段上下文: {list(stage_context.keys())}")
 
         # 记录用户消息
         if feedback:
@@ -525,18 +521,9 @@ class WeChatWriterService:
                 # 构建 RAG 上下文（research/outline/draft 状态需要知识库资料）
                 rag_context = ""
                 if to_state in ("research", "outline", "draft"):
-                    queries = build_search_queries(session.topic, session.confirmed_topic)
-                    print(f"[RAG] 搜索关键词: {queries}")
-                    all_results = []
-                    for q in queries:
-                        try:
-                            results = obsidian_reader.search(user_id, q, top_k=5)
-                            all_results.extend(results)
-                        except Exception as e:
-                            print(f"[RAG] 搜索失败 query='{q}': {e}")
-                    if all_results:
-                        rag_context = format_rag_context(all_results, max_snippets=8)
-                        print(f"[RAG] 检索到 {len(all_results)} 条资料，已格式化注入上下文")
+                    rag_context = self._build_rag_context(
+                        user_id, session.topic, session.confirmed_topic
+                    )
 
                 # 构建上下文
                 context = {}
@@ -550,6 +537,12 @@ class WeChatWriterService:
 
                 if rag_context:
                     context["rag_context"] = rag_context
+
+                # 注入前置阶段内容（选题确认单/资料卡片/大纲/初稿）
+                stage_context = self._build_stage_context(db, session_id, to_state)
+                context.update(stage_context)
+                if stage_context:
+                    print(f"[WeChatWriter] 注入阶段上下文: {list(stage_context.keys())}")
 
                 # 获取历史消息（只包含目标状态及之前状态的消息，防止回退后旧消息污染）
                 llm_messages = self._get_session_messages(db, session_id, current_state=to_state)
@@ -633,6 +626,11 @@ class WeChatWriterService:
 
         # 调用专家（带重新生成上下文）
         context = {"is_regenerate": True, "feedback": feedback}
+
+        # 注入前置阶段内容（选题确认单/资料卡片/大纲/初稿）
+        stage_context = self._build_stage_context(db, session_id, current_state)
+        context.update(stage_context)
+
         response = sm.generate_expert_response(current_state, llm_messages, context)
 
         # 记录 assistant 消息
@@ -701,6 +699,55 @@ class WeChatWriterService:
 
     # ========== 辅助方法 ==========
 
+    def _build_rag_context(self, user_id: int, topic: str,
+                            confirmed_topic: Optional[str] = None) -> str:
+        """构建 RAG 上下文（共用方法）
+
+        1. 先从本地 Obsidian 知识库搜索资料
+        2. 如果本地知识库找不到资料，使用 fallback 上下文，
+           告诉 AI 基于通用知识和网络公开信息输出资料卡片
+
+        Returns:
+            格式化后的 RAG 上下文字符串，空字符串表示无需注入
+        """
+        queries = build_search_queries(topic, confirmed_topic)
+        print(f"[RAG] 搜索关键词: {queries}")
+        all_results = []
+        for q in queries:
+            try:
+                results = obsidian_reader.search(user_id, q, top_k=5)
+                all_results.extend(results)
+            except Exception as e:
+                print(f"[RAG] 搜索失败 query='{q}': {e}")
+
+        if all_results:
+            rag_context = format_rag_context(all_results, max_snippets=8)
+            print(f"[RAG] 检索到 {len(all_results)} 条本地资料，已格式化注入上下文")
+            return rag_context
+
+        # 本地知识库无资料时，使用 fallback 上下文，告诉 AI 用通用知识和网络资料
+        print(f"[RAG] 本地知识库未找到相关资料，使用通用知识/网络资料 fallback")
+        fallback_context = f"""
+============================================================
+【本地知识库检索结果】
+未在用户的 Obsidian 知识库中找到与主题相关的笔记。
+
+【资料来源说明】
+由于本地知识库无相关资料，请基于你的通用知识和对互联网公开信息的了解，
+输出 3-5 条结构化的资料卡片。这些资料卡片可以：
+1. 引用该领域公认的常识、数据和最佳实践
+2. 引用公开可查的行业报告、统计数据（标注大致来源）
+3. 基于该主题的常见论点和案例进行合理推演
+4. 标注可信度时适当降低（本地未验证的资料不超过 3 星）
+
+【注意】
+- 不要因为本地无资料就向用户提问或要求补充信息
+- 直接基于你的知识输出资料卡片，确保内容有价值
+- 如果某些数据不确定，可以用"据公开报道"、"行业普遍认为"等措辞
+============================================================
+"""
+        return fallback_context
+
     @staticmethod
     def _state_to_step(state: str) -> str:
         """状态到输出 step 的映射"""
@@ -715,7 +762,7 @@ class WeChatWriterService:
 
     @staticmethod
     def _state_to_content_type(state: str) -> str:
-        """状态到输出 content_type 的映射"""
+        """状态到输出内容类型的映射"""
         mapping = {
             "topic_confirm": "analysis",
             "research": "materials",
@@ -724,6 +771,116 @@ class WeChatWriterService:
             "polish": "final",
         }
         return mapping.get(state, state)
+
+    def _get_latest_output(self, db: Session, session_id: int, step: str) -> Optional[str]:
+        """获取指定步骤最新的输出内容"""
+        output = (
+            db.query(WeChatWriterOutput)
+            .filter(
+                WeChatWriterOutput.session_id == session_id,
+                WeChatWriterOutput.step == step,
+            )
+            .order_by(WeChatWriterOutput.version.desc())
+            .first()
+        )
+        return output.content if output else None
+
+    def _get_session_materials_text(self, db: Session, session_id: int) -> str:
+        """获取会话的资料卡片文本（用于上下文注入）"""
+        materials = (
+            db.query(WeChatWriterMaterial)
+            .filter(WeChatWriterMaterial.session_id == session_id)
+            .order_by(WeChatWriterMaterial.created_at.asc())
+            .all()
+        )
+        if not materials:
+            return ""
+        lines = []
+        for i, m in enumerate(materials, 1):
+            credibility = "⭐" * (m.credibility_score or 3)
+            lines.append(f"【资料卡片 #{i}】")
+            if m.title:
+                lines.append(f"标题：{m.title}")
+            if m.source_type:
+                lines.append(f"来源：{m.source_type}")
+            lines.append(f"可信度：{credibility}")
+            if m.core_idea:
+                lines.append(f"核心观点：{m.core_idea}")
+            if m.useful_snippets:
+                lines.append(f"可用片段：{m.useful_snippets}")
+            if m.suggested_usage:
+                lines.append(f"推荐使用：{m.suggested_usage}")
+            if m.tags:
+                lines.append(f"标签：{m.tags}")
+            lines.append("")
+        return "\n".join(lines)
+
+    def _build_stage_context(self, db: Session, session_id: int, state: str) -> dict:
+        """构建指定阶段的前置内容上下文
+
+        每个阶段需要的前置内容：
+        - research: 选题确认单
+        - outline:  选题确认单 + 资料卡片
+        - draft:    选题确认单 + 资料卡片 + 大纲
+        - polish:   选题确认单 + 资料卡片 + 大纲 + 初稿
+        """
+        context = {}
+
+        # 选题确认单（所有阶段都需要）
+        confirmed_topic = self._get_latest_output(db, session_id, "topic")
+        if confirmed_topic:
+            context["topic_analysis"] = confirmed_topic
+
+        if state in ("outline", "draft", "polish"):
+            # 资料卡片
+            materials_text = self._get_session_materials_text(db, session_id)
+            if materials_text:
+                context["materials"] = materials_text
+
+        if state in ("draft", "polish"):
+            # 大纲
+            outline = self._get_latest_output(db, session_id, "outline")
+            if outline:
+                context["outline"] = outline
+
+        if state == "polish":
+            # 初稿
+            draft = self._get_latest_output(db, session_id, "draft")
+            if draft:
+                context["draft_content"] = draft
+
+        return context
+
+    def export_article(self, db: Session, user_id: int, session_id: int) -> tuple:
+        """导出文章内容
+
+        优先使用润色稿（polish），没有则使用初稿（draft）
+
+        Returns:
+            (content, title): 文章内容和标题
+        """
+        session = self.get_session(db, user_id, session_id)
+
+        # 优先获取润色稿
+        polish_output = self._get_latest_output(db, session_id, "polish")
+        if polish_output:
+            content = polish_output
+        else:
+            # 没有润色稿则使用初稿
+            draft_output = self._get_latest_output(db, session_id, "draft")
+            content = draft_output or ""
+
+        if not content:
+            return ("", "")
+
+        # 提取标题（第一个 # 开头的行）
+        import re
+        title_match = re.search(r'^#\s+(.+)$', content, re.MULTILINE)
+        title = title_match.group(1).strip() if title_match else session.title or "article"
+        # 清理文件名中的非法字符
+        title = re.sub(r'[\\/:*?"<>|]', '_', title)
+
+        return (content, title)
 
     # ========== 资料卡片（占位，T7 完善） ==========
 

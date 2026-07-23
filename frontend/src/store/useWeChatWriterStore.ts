@@ -13,6 +13,7 @@ import {
   regenerateOutput,
   rollbackToState,
   getOutputs,
+  exportArticle,
   type CreateWriterSessionRequest,
 } from '@/api/wechatWriter';
 import type { WriterSession, WriterOutput, WriterState } from '@/api/types';
@@ -36,6 +37,7 @@ export const WRITER_EXPERTS: { key: string; name: string; color: string; avatar:
   { key: 'researcher', name: '研究员', color: 'bg-blue-500', avatar: '🔍' },
   { key: 'outliner', name: '结构师', color: 'bg-orange-500', avatar: '📐' },
   { key: 'writer', name: '撰稿人', color: 'bg-purple-500', avatar: '✍️' },
+  { key: 'polisher', name: '润色师', color: 'bg-rose-500', avatar: '✨' },
 ];
 
 /** 根据状态获取专家 */
@@ -46,8 +48,8 @@ export function getExpertForState(state: WriterState): string {
     research: 'researcher',
     outline: 'outliner',
     draft: 'writer',
-    polish: 'writer',
-    done: 'writer',
+    polish: 'polisher',
+    done: 'polisher',
   };
   return map[state];
 }
@@ -96,6 +98,7 @@ interface WeChatWriterActions {
   doRegenerate: (sessionId: number, feedback?: string) => Promise<void>;
   doRollback: (sessionId: number, targetState: string, reason?: string) => Promise<void>;
   fetchOutputs: (sessionId: number, step?: string) => Promise<void>;
+  doExport: (sessionId: number, format?: 'markdown' | 'txt') => void;
   clearError: () => void;
   reset: () => void;
 }
@@ -227,6 +230,10 @@ export const useWeChatWriterStore = create<WeChatWriterState & WeChatWriterActio
     } catch (error) {
       console.error('获取输出版本失败:', error);
     }
+  },
+
+  doExport: (sessionId: number, format: 'markdown' | 'txt' = 'markdown') => {
+    exportArticle(sessionId, format);
   },
 
   clearError: () => set({ error: null }),

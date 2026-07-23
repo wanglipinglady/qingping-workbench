@@ -163,3 +163,52 @@ export function getOutputs(
 ): Promise<WriterOutput[]> {
   return get<WriterOutput[]>(`/wechat-writer/sessions/${sessionId}/outputs`, params);
 }
+
+// ==================== 导出文章 ====================
+
+/**
+ * 导出文章为 Markdown 文件
+ */
+export function exportArticle(sessionId: number, format: 'markdown' | 'txt' = 'markdown'): void {
+  const token = localStorage.getItem('token');
+  const baseUrl = import.meta.env.VITE_API_BASE_URL || '/api';
+  const url = `${baseUrl}/wechat-writer/sessions/${sessionId}/export?format=${format}`;
+  
+  // 创建临时链接下载
+  const link = document.createElement('a');
+  link.href = url;
+  link.setAttribute('download', '');
+  // 如果需要认证，添加 token 到 header
+  if (token) {
+    // 使用 fetch 方式获取并触发下载（支持 header 认证）
+    fetch(url, {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+      },
+    })
+      .then((res) => res.blob())
+      .then((blob) => {
+        const downloadUrl = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = downloadUrl;
+        // 从 Content-Disposition 提取文件名
+        const contentDisposition = res.headers.get('Content-Disposition');
+        let filename = 'article.md';
+        if (contentDisposition) {
+          const match = contentDisposition.match(/filename\*=UTF-8''(.+)/);
+          if (match) {
+            filename = decodeURIComponent(match[1]);
+          }
+        }
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(downloadUrl);
+      });
+  } else {
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  }
+}

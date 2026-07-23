@@ -27,6 +27,7 @@ export default function WeChatWriter() {
     doConfirm,
     doRegenerate,
     doRollback,
+    doExport,
   } = useWeChatWriterStore();
 
   // 弹窗状态
@@ -124,6 +125,11 @@ export default function WeChatWriter() {
     } catch (error) {
       console.error('回退失败:', error);
     }
+  };
+
+  const handleExport = (format: 'markdown' | 'txt' = 'markdown') => {
+    if (!currentSession) return;
+    doExport(currentSession.id, format);
   };
 
   // ==================== 辅助函数 ====================
@@ -354,7 +360,7 @@ export default function WeChatWriter() {
                 <div className="bg-white border-t border-gray-100 px-6 py-4">
                   <div className="flex items-center justify-center max-w-4xl mx-auto gap-4">
                     <div className="text-green-600 font-medium">🎉 写作已完成！</div>
-                    <Button variant="secondary" size="sm">
+                    <Button variant="secondary" size="sm" onClick={() => handleExport('markdown')}>
                       导出文章
                     </Button>
                   </div>

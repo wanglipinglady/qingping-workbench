@@ -402,6 +402,48 @@ async def stream_session_post(
     return StreamingResponse(_sse_gen(), media_type="text/event-stream")
 
 
+# ========== 导出文章 ==========
+
+@router.get("/sessions/{session_id}/export", summary="导出文章为 Markdown")
+async def export_article(
+    session_id: int,
+    format: str = Query("markdown", description="导出格式: markdown/txt"),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    导出文章为 Markdown 或纯文本格式
+
+    优先使用润色稿（polish），没有则使用初稿（draft）
+    """
+    from fastapi.responses import PlainTextResponse
+
+    article_content, title = wechat_writer_service.export_article(
+        db, current_user.id, session_id
+    )
+
+    if not article_content:
+        raise ValueError("暂无文章内容可导出，请先完成写作")
+
+    filename = f"{title or 'article'}.md"
+
+    if format == "txt":
+        # 移除 Markdown 标记
+        import re
+        txt_content = re.sub(r'^#{1,6}\s+', '', article_content, flags=re.MULTILINE)
+        txt_content = re.sub(r'\*\*(.+?)\*\*', r'\1', txt_content)
+        txt_content = re.sub(r'\*(.+?)\*', r'\1', txt_content)
+        txt_content = re.sub(r'`(.+?)`', r'\1', txt_content)
+        txt_content = re.sub(r'\[(.+?)\]\(.+?\)', r'\1', txt_content)
+        filename = f"{title or 'article'}.txt"
+        article_content = txt_content
+
+    headers = {
+        "Content-Disposition": f"attachment; filename*=UTF-8''{filename}",
+    }
+    return PlainTextResponse(article_content, headers=headers)
+
+
 # ========== 写作模板 ==========
 
 @router.get("/templates", summary="获取写作模板列表")
