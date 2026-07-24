@@ -30,6 +30,7 @@ export default function WeChatWriter() {
     doRollback,
     doExport,
     fetchObsidianFolders,
+    syncObsidianVault,
     updateSessionFolder,
   } = useWeChatWriterStore();
 
@@ -50,6 +51,7 @@ export default function WeChatWriter() {
   // 目录选择弹窗
   const [showFolderModal, setShowFolderModal] = useState(false);
   const [selectedFolder, setSelectedFolder] = useState<string>('');
+  const [syncResult, setSyncResult] = useState<string>('');
 
   const outputEndRef = useRef<HTMLDivElement>(null);
 
@@ -649,6 +651,47 @@ export default function WeChatWriter() {
                   </label>
                 ))}
               </div>
+            )}
+          </div>
+          {/* 同步知识库 */}
+          <div className="flex items-center justify-between pt-1 border-t border-gray-100">
+            <div className="flex items-center gap-2">
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={loading.sync}
+                onClick={async () => {
+                  setSyncResult('');
+                  try {
+                    const result = await syncObsidianVault(false);
+                    setSyncResult(`同步完成：扫描 ${result.total_files} 篇，新增 ${result.added}，更新 ${result.updated}，删除 ${result.deleted}`);
+                  } catch (error) {
+                    setSyncResult('同步失败，请检查后端日志');
+                  }
+                }}
+              >
+                {loading.sync ? '同步中...' : '快速同步'}
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={loading.sync}
+                onClick={async () => {
+                  if (!confirm('强制全量同步会重新索引所有笔记，耗时较长，确认继续？')) return;
+                  setSyncResult('');
+                  try {
+                    const result = await syncObsidianVault(true);
+                    setSyncResult(`全量同步完成：扫描 ${result.total_files} 篇，新增 ${result.added}，更新 ${result.updated}，删除 ${result.deleted}`);
+                  } catch (error) {
+                    setSyncResult('同步失败，请检查后端日志');
+                  }
+                }}
+              >
+                {loading.sync ? '同步中...' : '强制全量同步'}
+              </Button>
+            </div>
+            {syncResult && (
+              <span className="text-xs text-text-tertiary">{syncResult}</span>
             )}
           </div>
           <div className="flex justify-end gap-3 pt-2">

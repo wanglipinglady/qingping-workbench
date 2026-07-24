@@ -182,6 +182,26 @@ export function getObsidianFolders(): Promise<ObsidianFolder[]> {
   return get<ObsidianFolder[]>('/wechat-writer/obsidian-folders');
 }
 
+/** Obsidian 同步结果 */
+export interface ObsidianSyncResult {
+  total_files: number;
+  added: number;
+  updated: number;
+  deleted: number;
+  skipped: number;
+  errors: number;
+  last_sync_time: number;
+}
+
+/**
+ * 同步 Obsidian Vault 到向量库
+ *
+ * @param force 是否强制全量重新同步（忽略之前的同步状态）
+ */
+export function syncObsidian(force: boolean = false): Promise<ObsidianSyncResult> {
+  return post<ObsidianSyncResult>(`/wechat-writer/obsidian/sync?force=${force}`);
+}
+
 // ==================== 导出文章 ====================
 
 /**

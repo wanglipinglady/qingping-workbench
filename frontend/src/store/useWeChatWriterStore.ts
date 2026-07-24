@@ -16,6 +16,7 @@ import {
   getOutputs,
   exportArticle,
   getObsidianFolders,
+  syncObsidian,
   type CreateWriterSessionRequest,
   type ObsidianFolder,
 } from '@/api/wechatWriter';
@@ -87,6 +88,7 @@ interface WeChatWriterState {
     regenerate: boolean;
     rollback: boolean;
     folders: boolean;
+    sync: boolean;
   };
   error: string | null;
   pagination: { page: number; pageSize: number; total: number };
@@ -105,6 +107,7 @@ interface WeChatWriterActions {
   fetchOutputs: (sessionId: number, step?: string) => Promise<void>;
   doExport: (sessionId: number, format?: 'markdown' | 'txt') => void;
   fetchObsidianFolders: () => Promise<void>;
+  syncObsidianVault: (force?: boolean) => Promise<import('@/api/wechatWriter').ObsidianSyncResult>;
   updateSessionFolder: (sessionId: number, folder: string | null) => Promise<void>;
   clearError: () => void;
   reset: () => void;
@@ -123,6 +126,7 @@ const initialState: WeChatWriterState = {
     regenerate: false,
     rollback: false,
     folders: false,
+    sync: false,
   },
   error: null,
   pagination: { page: 1, pageSize: 20, total: 0 },
@@ -253,6 +257,18 @@ export const useWeChatWriterStore = create<WeChatWriterState & WeChatWriterActio
     } catch (error) {
       console.error('获取 Obsidian 目录失败:', error);
       set({ loading: { ...get().loading, folders: false } });
+    }
+  },
+
+  syncObsidianVault: async (force = false) => {
+    set((state) => ({ loading: { ...state.loading, sync: true } }));
+    try {
+      const result = await syncObsidian(force);
+      // 同步完成后自动刷新目录列表
+      await get().fetchObsidianFolders();
+      return result;
+    } finally {
+      set((state) => ({ loading: { ...state.loading, sync: false } }));
     }
   },
 
