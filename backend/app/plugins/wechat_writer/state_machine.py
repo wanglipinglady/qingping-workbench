@@ -125,6 +125,15 @@ STATE_MAX_TOKENS: Dict[str, int] = {
     WriterState.POLISH.value: 16384,
 }
 
+# 各阶段的任务指令（注入到 system 消息中，确保 AI 明确当前任务）
+STATE_TASK_INSTRUCTION: Dict[str, str] = {
+    WriterState.TOPIC_CONFIRM.value: "【当前任务】请分析用户给出的主题，直接输出结构化的选题确认单。不需要询问用户，直接给出你的分析和推荐。",
+    WriterState.RESEARCH.value: "【当前任务】请根据选题确认单搜索和分析资料，直接输出结构化的资料卡片。不需要询问用户，直接输出你的研究成果。",
+    WriterState.OUTLINE.value: "【当前任务】请根据选题确认单和资料卡片，直接设计并输出完整的文章大纲。不要询问用户偏好，直接给出你觉得最好的大纲结构。",
+    WriterState.DRAFT.value: "【当前任务】请根据选题确认单、资料卡片和大纲，直接撰写完整的文章初稿。不要询问用户，直接输出完整的 Markdown 格式文章。",
+    WriterState.POLISH.value: "【当前任务】请立即润色以下初稿全文。直接输出润色后的完整文章（含润色说明），不要询问用户任何问题，不要确认任何需求，不要等待用户回复。",
+}
+
 
 class WeChatWriterStateMachine:
     """微信公众号写作助手状态机
@@ -381,6 +390,11 @@ class WeChatWriterStateMachine:
                     "content": f"【初稿全文】\n{context['draft_content']}"
                 })
 
+        # 注入当前阶段的任务指令（确保 AI 明确知道该做什么）
+        task_instruction = STATE_TASK_INSTRUCTION.get(state)
+        if task_instruction:
+            full_messages.append({"role": "system", "content": task_instruction})
+
         # 添加历史消息
         full_messages.extend(messages)
 
@@ -469,6 +483,11 @@ class WeChatWriterStateMachine:
                     "role": "system",
                     "content": f"【初稿全文】\n{context['draft_content']}"
                 })
+
+        # 注入当前阶段的任务指令（确保 AI 明确知道该做什么）
+        task_instruction = STATE_TASK_INSTRUCTION.get(state)
+        if task_instruction:
+            full_messages.append({"role": "system", "content": task_instruction})
 
         full_messages.extend(messages)
 
