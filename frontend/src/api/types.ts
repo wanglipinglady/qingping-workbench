@@ -231,6 +231,7 @@ export interface WriterSession {
   status: 'active' | 'completed' | 'archived';
   total_tokens: number;
   obsidian_sync_time?: string;
+  obsidian_folder?: string;
   material_count?: number;
   message_count?: number;
   output_count?: number;

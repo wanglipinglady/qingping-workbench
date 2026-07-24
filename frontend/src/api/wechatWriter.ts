@@ -165,6 +165,23 @@ export function getOutputs(
   return get<WriterOutput[]>(`/wechat-writer/sessions/${sessionId}/outputs`, params);
 }
 
+// ==================== Obsidian 目录 ====================
+
+/** Obsidian 目录项 */
+export interface ObsidianFolder {
+  path: string;
+  name: string;
+  depth: number;
+  note_count: number;
+}
+
+/**
+ * 获取 Obsidian Vault 中的目录列表
+ */
+export function getObsidianFolders(): Promise<ObsidianFolder[]> {
+  return get<ObsidianFolder[]>('/wechat-writer/obsidian-folders');
+}
+
 // ==================== 导出文章 ====================
 
 /**

@@ -335,7 +335,8 @@ class WeChatWriterService:
         rag_context = ""
         if current_state in ("research", "outline", "draft"):
             rag_context = self._build_rag_context(
-                user_id, session.topic, session.confirmed_topic
+                user_id, session.topic, session.confirmed_topic,
+                obsidian_folder=session.obsidian_folder
             )
 
         # 构建上下文
@@ -432,7 +433,8 @@ class WeChatWriterService:
         rag_context = ""
         if current_state in ("research", "outline", "draft"):
             rag_context = self._build_rag_context(
-                user_id, session.topic, session.confirmed_topic
+                user_id, session.topic, session.confirmed_topic,
+                obsidian_folder=session.obsidian_folder
             )
 
         context = {}
@@ -552,7 +554,8 @@ class WeChatWriterService:
                 rag_context = ""
                 if to_state in ("research", "outline", "draft"):
                     rag_context = self._build_rag_context(
-                        user_id, session.topic, session.confirmed_topic
+                        user_id, session.topic, session.confirmed_topic,
+                        obsidian_folder=session.obsidian_folder
                     )
 
                 # 构建上下文
@@ -730,22 +733,29 @@ class WeChatWriterService:
     # ========== 辅助方法 ==========
 
     def _build_rag_context(self, user_id: int, topic: str,
-                            confirmed_topic: Optional[str] = None) -> str:
+                            confirmed_topic: Optional[str] = None,
+                            obsidian_folder: Optional[str] = None) -> str:
         """构建 RAG 上下文（共用方法）
 
-        1. 先从本地 Obsidian 知识库搜索资料
+        1. 先从本地 Obsidian 知识库搜索资料（支持按目录过滤）
         2. 如果本地知识库找不到资料，使用 fallback 上下文，
            告诉 AI 基于通用知识和网络公开信息输出资料卡片
+
+        Args:
+            obsidian_folder: 限制搜索的 Obsidian 目录路径（相对 Vault 根目录）
 
         Returns:
             格式化后的 RAG 上下文字符串，空字符串表示无需注入
         """
         queries = build_search_queries(topic, confirmed_topic)
-        print(f"[RAG] 搜索关键词: {queries}")
+        folder_hint = f" [目录: {obsidian_folder}]" if obsidian_folder else ""
+        print(f"[RAG] 搜索关键词: {queries}{folder_hint}")
         all_results = []
         for q in queries:
             try:
-                results = obsidian_reader.search(user_id, q, top_k=5)
+                results = obsidian_reader.search(
+                    user_id, q, top_k=5, folder_filter=obsidian_folder
+                )
                 all_results.extend(results)
             except Exception as e:
                 print(f"[RAG] 搜索失败 query='{q}': {e}")

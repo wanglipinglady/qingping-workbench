@@ -17,6 +17,7 @@ export default function WeChatWriter() {
     sessions,
     currentSession,
     outputs,
+    obsidianFolders,
     loading,
     fetchSessions,
     createSessionItem,
@@ -28,6 +29,8 @@ export default function WeChatWriter() {
     doRegenerate,
     doRollback,
     doExport,
+    fetchObsidianFolders,
+    updateSessionFolder,
   } = useWeChatWriterStore();
 
   // 弹窗状态
@@ -43,6 +46,10 @@ export default function WeChatWriter() {
   const [showRollbackModal, setShowRollbackModal] = useState(false);
   const [rollbackTarget, setRollbackTarget] = useState<WriterState>('idle');
   const [rollbackReason, setRollbackReason] = useState('');
+
+  // 目录选择弹窗
+  const [showFolderModal, setShowFolderModal] = useState(false);
+  const [selectedFolder, setSelectedFolder] = useState<string>('');
 
   const outputEndRef = useRef<HTMLDivElement>(null);
 
@@ -130,6 +137,25 @@ export default function WeChatWriter() {
   const handleExport = (format: 'markdown' | 'txt' = 'markdown') => {
     if (!currentSession) return;
     doExport(currentSession.id, format);
+  };
+
+  const handleOpenFolderModal = async () => {
+    if (obsidianFolders.length === 0) {
+      await fetchObsidianFolders();
+    }
+    setSelectedFolder(currentSession?.obsidian_folder || '');
+    setShowFolderModal(true);
+  };
+
+  const handleSaveFolder = async () => {
+    if (!currentSession) return;
+    try {
+      const folder = selectedFolder || null;
+      await updateSessionFolder(currentSession.id, folder);
+      setShowFolderModal(false);
+    } catch (error) {
+      console.error('保存目录选择失败:', error);
+    }
   };
 
   // ==================== 辅助函数 ====================
@@ -325,33 +351,64 @@ export default function WeChatWriter() {
               {/* 底部操作区 */}
               {currentSession.current_state !== 'idle' && currentSession.current_state !== 'done' && (
                 <div className="bg-white border-t border-gray-100 px-6 py-4">
-                  <div className="flex items-center justify-between max-w-4xl mx-auto">
-                    <div className="flex items-center gap-3">
+                  <div className="max-w-4xl mx-auto">
+                    {/* 目录选择提示（选题确认和资料搜集阶段） */}
+                    {(currentSession.current_state === 'topic_confirm' || currentSession.current_state === 'research') && (
+                      <div className="flex items-center gap-2 mb-3 text-sm">
+                        <span className="text-text-tertiary">📁 参考资料目录：</span>
+                        {currentSession.obsidian_folder ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-blue-50 text-blue-700 rounded">
+                            <span className="truncate max-w-[300px]">{currentSession.obsidian_folder}</span>
+                            {currentSession.current_state === 'topic_confirm' && (
+                              <button
+                                onClick={handleOpenFolderModal}
+                                className="text-blue-500 hover:text-blue-700 ml-1"
+                                title="修改"
+                              >
+                                ✏️
+                              </button>
+                            )}
+                          </span>
+                        ) : currentSession.current_state === 'topic_confirm' ? (
+                          <button
+                            onClick={handleOpenFolderModal}
+                            className="text-primary-600 hover:text-primary-700 underline"
+                          >
+                            选择目录（可选，不选则搜索全部）
+                          </button>
+                        ) : (
+                          <span className="text-text-tertiary">全部 Vault</span>
+                        )}
+                      </div>
+                    )}
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => setShowRegenerateModal(true)}
+                          loading={loading.regenerate}
+                        >
+                          🔄 重新生成
+                        </Button>
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => setShowRollbackModal(true)}
+                          loading={loading.rollback}
+                        >
+                          ↩️ 回退
+                        </Button>
+                      </div>
                       <Button
-                        variant="secondary"
-                        size="sm"
-                        onClick={() => setShowRegenerateModal(true)}
-                        loading={loading.regenerate}
+                        variant="primary"
+                        size="md"
+                        onClick={handleConfirm}
+                        loading={loading.confirm}
                       >
-                        🔄 重新生成
-                      </Button>
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        onClick={() => setShowRollbackModal(true)}
-                        loading={loading.rollback}
-                      >
-                        ↩️ 回退
+                        确认并继续 →
                       </Button>
                     </div>
-                    <Button
-                      variant="primary"
-                      size="md"
-                      onClick={handleConfirm}
-                      loading={loading.confirm}
-                    >
-                      确认并继续 →
-                    </Button>
                   </div>
                 </div>
               )}
@@ -527,6 +584,77 @@ export default function WeChatWriter() {
               disabled={!rollbackTarget}
             >
               确认回退
+            </Button>
+          </div>
+        </div>
+      {/* 目录选择弹窗 */}
+      <Modal
+        visible={showFolderModal}
+        onClose={() => setShowFolderModal(false)}
+        title="选择参考资料目录"
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-text-tertiary">
+            选择 Obsidian Vault 中的特定目录，资料搜集将只搜索该目录及其子目录下的笔记。
+            不选则搜索整个 Vault。
+          </p>
+          <div className="max-h-80 overflow-y-auto border border-gray-200 rounded-lg">
+            {loading.folders ? (
+              <div className="p-4 text-center text-text-tertiary text-sm">加载中...</div>
+            ) : obsidianFolders.length === 0 ? (
+              <div className="p-4 text-center text-text-tertiary text-sm">
+                未找到目录，请检查 Vault 路径配置
+              </div>
+            ) : (
+              <div className="divide-y divide-gray-100">
+                <label
+                  className={`flex items-center gap-3 p-3 cursor-pointer transition-colors ${
+                    selectedFolder === '' ? 'bg-primary-50' : 'hover:bg-gray-50'
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="obsidianFolder"
+                    value=""
+                    checked={selectedFolder === ''}
+                    onChange={() => setSelectedFolder('')}
+                    className="text-primary-500"
+                  />
+                  <span className="text-sm">📂 全部 Vault（不限制目录）</span>
+                </label>
+                {obsidianFolders.map((folder) => (
+                  <label
+                    key={folder.path}
+                    className={`flex items-center gap-3 p-3 cursor-pointer transition-colors ${
+                      selectedFolder === folder.path ? 'bg-primary-50' : 'hover:bg-gray-50'
+                    }`}
+                    style={{ paddingLeft: `${12 + folder.depth * 20}px` }}
+                  >
+                    <input
+                      type="radio"
+                      name="obsidianFolder"
+                      value={folder.path}
+                      checked={selectedFolder === folder.path}
+                      onChange={() => setSelectedFolder(folder.path)}
+                      className="text-primary-500"
+                    />
+                    <span className="text-sm flex-1">
+                      {'  '.repeat(folder.depth)}📁 {folder.name}
+                    </span>
+                    <span className="text-xs text-text-tertiary">
+                      {folder.note_count} 篇笔记
+                    </span>
+                  </label>
+                ))}
+              </div>
+            )}
+          </div>
+          <div className="flex justify-end gap-3 pt-2">
+            <Button variant="secondary" onClick={() => setShowFolderModal(false)}>
+              取消
+            </Button>
+            <Button variant="primary" onClick={handleSaveFolder}>
+              确认
             </Button>
           </div>
         </div>

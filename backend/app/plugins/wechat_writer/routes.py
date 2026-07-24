@@ -480,6 +480,25 @@ async def export_article(
     return PlainTextResponse(article_content, headers=headers)
 
 
+# ========== Obsidian 目录 ==========
+
+@router.get("/obsidian-folders", summary="获取 Obsidian Vault 目录列表")
+async def list_obsidian_folders(
+    current_user: User = Depends(get_current_user),
+):
+    """
+    扫描 Obsidian Vault，返回所有可用目录（供资料搜集节点选择）
+
+    返回按路径排序的目录列表，每项包含：
+    - path: 相对路径（正斜杠分隔）
+    - name: 目录名称
+    - depth: 目录深度
+    - note_count: 该目录下的笔记数量
+    """
+    folders = obsidian_reader.list_folders()
+    return unified_response(data=folders)
+
+
 # ========== 写作模板 ==========
 
 @router.get("/templates", summary="获取写作模板列表")

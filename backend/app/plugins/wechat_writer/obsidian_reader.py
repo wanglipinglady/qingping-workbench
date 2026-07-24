@@ -620,6 +620,7 @@ class ObsidianReader:
         query: str,
         top_k: int = 5,
         tags: Optional[List[str]] = None,
+        folder_filter: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """在 Obsidian 笔记中进行语义搜索
 
@@ -628,6 +629,7 @@ class ObsidianReader:
             query: 查询文本
             top_k: 返回结果数量
             tags: 按标签过滤（可选）
+            folder_filter: 按目录路径过滤（可选），只搜索该目录及其子目录下的笔记
 
         Returns:
             搜索结果列表，每项包含：
@@ -639,14 +641,7 @@ class ObsidianReader:
         """
         collection_name = self._get_collection_name(user_id)
 
-        # 标签过滤（通过 where 条件）
-        where = None
-        if tags and len(tags) > 0:
-            # ChromaDB 的 where 条件支持 $contains 操作符
-            # 这里先不过滤，在结果中过滤
-            pass
-
-        # 多取一些结果（10倍，至少 50 条），用于多样性重排 + 标签过滤
+        # 多取一些结果（10倍，至少 50 条），用于多样性重排 + 标签过滤 + 目录过滤
         # 长文档会产生很多语义接近的 chunk，需要扩大候选池才能让其他文档有机会出现
         fetch_count = max(top_k * 10, 50)
 
@@ -656,10 +651,20 @@ class ObsidianReader:
             n_results=fetch_count,
         )
 
-        # 标签过滤 + 结果格式化
+        # 标签过滤 + 目录过滤 + 结果格式化
         formatted = []
         for r in results:
             metadata = r.get("metadata", {})
+            note_path = metadata.get("path", "")
+
+            # 目录过滤：只保留指定目录及其子目录下的笔记
+            if folder_filter:
+                # 统一使用正斜杠比较
+                normalized_path = note_path.replace('\\', '/')
+                normalized_filter = folder_filter.replace('\\', '/').rstrip('/')
+                if not normalized_path.startswith(normalized_filter + '/'):
+                    continue
+
             note_tags = []
             tags_str = metadata.get("tags", "[]")
             try:
@@ -677,7 +682,7 @@ class ObsidianReader:
             clean_content = self._extract_complete_sentence(raw_content, max_len=600)
 
             formatted.append({
-                "path": metadata.get("path", ""),
+                "path": note_path,
                 "title": metadata.get("title", ""),
                 "content": clean_content,
                 "tags": note_tags,
@@ -690,6 +695,49 @@ class ObsidianReader:
         diversified = self._diversified_rerank(formatted, top_k)
 
         return diversified
+
+    def list_folders(self) -> List[Dict[str, Any]]:
+        """扫描 Vault 中的所有目录，返回目录树结构
+
+        Returns:
+            目录列表，每项包含：
+            - path: 相对路径（正斜杠分隔）
+            - name: 目录名称
+            - depth: 目录深度（0=根目录下的一级目录）
+            - note_count: 该目录下的笔记文件数量
+        """
+        if not self.vault_path.exists():
+            return []
+
+        folders = []
+        for root, dirs, filenames in os.walk(self.vault_path):
+            # 过滤排除目录
+            dirs[:] = [d for d in dirs if d not in self.exclude_dirs]
+
+            rel_root = os.path.relpath(root, self.vault_path)
+            if rel_root == '.':
+                continue  # 跳过根目录本身
+
+            # 统一正斜杠
+            rel_path = rel_root.replace('\\', '/')
+            depth = rel_path.count('/')
+
+            # 统计该目录下的笔记数量
+            note_count = sum(
+                1 for f in filenames
+                if os.path.splitext(f)[1].lower() in SUPPORTED_EXTENSIONS
+            )
+
+            folders.append({
+                "path": rel_path,
+                "name": os.path.basename(rel_root),
+                "depth": depth,
+                "note_count": note_count,
+            })
+
+        # 按路径排序
+        folders.sort(key=lambda x: x["path"])
+        return folders
 
     # ------------------------------------------------------------------
     # 公共 API：状态查询

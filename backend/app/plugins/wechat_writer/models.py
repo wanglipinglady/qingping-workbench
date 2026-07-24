@@ -33,6 +33,7 @@ class WeChatWriterSession(Base):
     )
     total_tokens = Column(Integer, nullable=False, default=0, comment="累计Token消耗")
     obsidian_sync_time = Column(DateTime, nullable=True, comment="Obsidian上次同步时间")
+    obsidian_folder = Column(String(500), nullable=True, comment="资料搜集时限制的Obsidian目录路径（相对Vault根目录）")
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True, comment="创建时间")
     updated_at = Column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow,

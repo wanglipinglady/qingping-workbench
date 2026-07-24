@@ -49,6 +49,7 @@ class SessionUpdateRequest(BaseModel):
     title: Optional[str] = Field(None, max_length=200)
     confirmed_topic: Optional[str] = Field(None)
     status: Optional[SessionStatus] = Field(None)
+    obsidian_folder: Optional[str] = Field(None, max_length=500, description="资料搜集时限制的Obsidian目录路径（相对Vault根目录）")
 
 
 class SessionResponse(BaseModel):
@@ -63,6 +64,7 @@ class SessionResponse(BaseModel):
     status: str
     total_tokens: int
     obsidian_sync_time: Optional[datetime] = None
+    obsidian_folder: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 

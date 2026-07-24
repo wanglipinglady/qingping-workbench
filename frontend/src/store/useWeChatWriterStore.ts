@@ -7,6 +7,7 @@ import {
   getWriterSessions,
   getWriterSession,
   createWriterSession,
+  updateWriterSession,
   deleteWriterSession,
   startWriting,
   confirmState,
@@ -14,7 +15,9 @@ import {
   rollbackToState,
   getOutputs,
   exportArticle,
+  getObsidianFolders,
   type CreateWriterSessionRequest,
+  type ObsidianFolder,
 } from '@/api/wechatWriter';
 import type { WriterSession, WriterOutput, WriterState } from '@/api/types';
 
@@ -75,6 +78,7 @@ interface WeChatWriterState {
   sessions: WriterSession[];
   currentSession: WriterSession | null;
   outputs: WriterOutput[];
+  obsidianFolders: ObsidianFolder[];
   loading: {
     sessions: boolean;
     session: boolean;
@@ -82,6 +86,7 @@ interface WeChatWriterState {
     confirm: boolean;
     regenerate: boolean;
     rollback: boolean;
+    folders: boolean;
   };
   error: string | null;
   pagination: { page: number; pageSize: number; total: number };
@@ -99,6 +104,8 @@ interface WeChatWriterActions {
   doRollback: (sessionId: number, targetState: string, reason?: string) => Promise<void>;
   fetchOutputs: (sessionId: number, step?: string) => Promise<void>;
   doExport: (sessionId: number, format?: 'markdown' | 'txt') => void;
+  fetchObsidianFolders: () => Promise<void>;
+  updateSessionFolder: (sessionId: number, folder: string | null) => Promise<void>;
   clearError: () => void;
   reset: () => void;
 }
@@ -107,6 +114,7 @@ const initialState: WeChatWriterState = {
   sessions: [],
   currentSession: null,
   outputs: [],
+  obsidianFolders: [],
   loading: {
     sessions: false,
     session: false,
@@ -114,6 +122,7 @@ const initialState: WeChatWriterState = {
     confirm: false,
     regenerate: false,
     rollback: false,
+    folders: false,
   },
   error: null,
   pagination: { page: 1, pageSize: 20, total: 0 },
@@ -234,6 +243,33 @@ export const useWeChatWriterStore = create<WeChatWriterState & WeChatWriterActio
 
   doExport: (sessionId: number, format: 'markdown' | 'txt' = 'markdown') => {
     exportArticle(sessionId, format);
+  },
+
+  fetchObsidianFolders: async () => {
+    set((state) => ({ loading: { ...state.loading, folders: true } }));
+    try {
+      const folders = await getObsidianFolders();
+      set({ obsidianFolders: folders, loading: { ...get().loading, folders: false } });
+    } catch (error) {
+      console.error('获取 Obsidian 目录失败:', error);
+      set({ loading: { ...get().loading, folders: false } });
+    }
+  },
+
+  updateSessionFolder: async (sessionId: number, folder: string | null) => {
+    try {
+      const updated = await updateWriterSession(sessionId, {
+        obsidian_folder: folder || undefined,
+      });
+      set((state) => ({
+        currentSession: state.currentSession?.id === sessionId
+          ? { ...state.currentSession, obsidian_folder: updated.obsidian_folder }
+          : state.currentSession,
+      }));
+    } catch (error) {
+      console.error('更新会话目录失败:', error);
+      throw error;
+    }
   },
 
   clearError: () => set({ error: null }),
