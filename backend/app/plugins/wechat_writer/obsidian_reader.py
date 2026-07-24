@@ -704,12 +704,13 @@ class ObsidianReader:
             - path: 相对路径（正斜杠分隔）
             - name: 目录名称
             - depth: 目录深度（0=根目录下的一级目录）
-            - note_count: 该目录下的笔记文件数量
+            - note_count: 该目录及其子目录下的笔记文件总数
         """
         if not self.vault_path.exists():
             return []
 
-        folders = []
+        # 第一步：收集所有目录及其直接笔记数量
+        folder_direct_counts: Dict[str, int] = {}
         for root, dirs, filenames in os.walk(self.vault_path):
             # 过滤排除目录
             dirs[:] = [d for d in dirs if d not in self.exclude_dirs]
@@ -720,19 +721,32 @@ class ObsidianReader:
 
             # 统一正斜杠
             rel_path = rel_root.replace('\\', '/')
-            depth = rel_path.count('/')
 
-            # 统计该目录下的笔记数量
-            note_count = sum(
+            # 统计该目录下的直接笔记数量
+            direct_count = sum(
                 1 for f in filenames
                 if os.path.splitext(f)[1].lower() in SUPPORTED_EXTENSIONS
             )
+            folder_direct_counts[rel_path] = direct_count
 
+        # 第二步：计算每个目录的总笔记数量（包含所有子目录）
+        folder_total_counts: Dict[str, int] = {}
+        for path in folder_direct_counts:
+            total = folder_direct_counts[path]
+            for other_path, other_count in folder_direct_counts.items():
+                if other_path != path and other_path.startswith(path + '/'):
+                    total += other_count
+            folder_total_counts[path] = total
+
+        # 第三步：构建返回结果
+        folders = []
+        for rel_path, direct_count in folder_direct_counts.items():
+            depth = rel_path.count('/')
             folders.append({
                 "path": rel_path,
-                "name": os.path.basename(rel_root),
+                "name": os.path.basename(rel_path.replace('/', os.sep)),
                 "depth": depth,
-                "note_count": note_count,
+                "note_count": folder_total_counts[rel_path],
             })
 
         # 按路径排序
