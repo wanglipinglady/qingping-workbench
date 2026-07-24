@@ -3,6 +3,7 @@
 定义写作助手相关的 API 端点
 """
 from typing import Optional
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, Query, Body, Request, HTTPException, status
 from fastapi.responses import StreamingResponse
@@ -471,8 +472,10 @@ async def export_article(
         filename = f"{title or 'article'}.txt"
         article_content = txt_content
 
+    # 对中文文件名进行 URL 编码，避免 latin-1 编码错误
+    encoded_filename = quote(filename)
     headers = {
-        "Content-Disposition": f"attachment; filename*=UTF-8''{filename}",
+        "Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}",
     }
     return PlainTextResponse(article_content, headers=headers)
 
