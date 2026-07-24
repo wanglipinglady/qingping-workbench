@@ -3,6 +3,7 @@
  */
 
 import { get, post, put, del, aiPost } from './index';
+import { storage } from '@/utils/storage';
 import type {
   WriterSession,
   WriterOutput,
@@ -176,7 +177,7 @@ export function getOutputs(
  * 不会把错误 JSON 当成文件下载。
  */
 export function exportArticle(sessionId: number, format: 'markdown' | 'txt' = 'markdown'): void {
-  const token = localStorage.getItem('token');
+  const token = storage.getToken();
   const baseUrl = import.meta.env.VITE_API_BASE_URL || '/api';
 
   // 把 token 放到 URL query 中（支持浏览器直接打开链接下载）

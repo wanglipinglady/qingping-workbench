@@ -3,6 +3,7 @@
  */
 
 import { get, post } from './index';
+import { storage } from '@/utils/storage';
 import type {
   ExpertSession,
   ExpertMessage,
@@ -94,7 +95,7 @@ export function getSSEUrl(
   expertRole?: ExpertRole
 ): string {
   const baseUrl = import.meta.env.VITE_SSE_BASE_URL || import.meta.env.VITE_API_BASE_URL;
-  const token = localStorage.getItem('token') || '';
+  const token = storage.getToken() || '';
   const params = new URLSearchParams({
     session_id: String(sessionId),
     content,

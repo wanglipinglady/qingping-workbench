@@ -4,6 +4,7 @@
  */
 
 import { get, post, put } from './index';
+import { storage } from '@/utils/storage';
 import type {
   User,
   LoginRequest,
@@ -46,5 +47,5 @@ export function updateProfile(data: Partial<User>): Promise<User> {
  * 登出（前端清除 token 即可，后端无状态 JWT）
  */
 export function logout(): void {
-  localStorage.removeItem('token');
+  storage.clearToken();
 }
