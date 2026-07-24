@@ -167,48 +167,57 @@ export function getOutputs(
 // ==================== 导出文章 ====================
 
 /**
- * 导出文章为 Markdown 文件
+ * 导出文章为 Markdown 或 TXT 文件
+ *
+ * 认证方式：token 同时放在 URL query 参数和 Authorization header 中，
+ * 确保无论哪种方式都能通过后端认证。
+ *
+ * 错误处理：非 2xx 响应会解析 JSON 错误信息并 alert 提示用户，
+ * 不会把错误 JSON 当成文件下载。
  */
 export function exportArticle(sessionId: number, format: 'markdown' | 'txt' = 'markdown'): void {
   const token = localStorage.getItem('token');
   const baseUrl = import.meta.env.VITE_API_BASE_URL || '/api';
-  const url = `${baseUrl}/wechat-writer/sessions/${sessionId}/export?format=${format}`;
-  
-  // 创建临时链接下载
-  const link = document.createElement('a');
-  link.href = url;
-  link.setAttribute('download', '');
-  // 如果需要认证，添加 token 到 header
-  if (token) {
-    // 使用 fetch 方式获取并触发下载（支持 header 认证）
-    fetch(url, {
-      headers: {
-        'Authorization': `Bearer ${token}`,
-      },
+
+  // 把 token 放到 URL query 中（支持浏览器直接打开链接下载）
+  const queryToken = token ? `&token=${encodeURIComponent(token)}` : '';
+  const url = `${baseUrl}/wechat-writer/sessions/${sessionId}/export?format=${format}${queryToken}`;
+
+  fetch(url, {
+    headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+  })
+    .then(async (res) => {
+      if (!res.ok) {
+        // 解析后端返回的错误 JSON
+        const errorData = await res.json().catch(() => ({ message: '导出失败' }));
+        const errorMsg = errorData.message || errorData.detail || '导出失败';
+        alert(`导出失败：${errorMsg}`);
+        throw new Error(errorMsg);
+      }
+      const blob = await res.blob();
+      const contentDisposition = res.headers.get('Content-Disposition');
+      return { blob, contentDisposition };
     })
-      .then((res) => res.blob())
-      .then((blob) => {
-        const downloadUrl = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = downloadUrl;
-        // 从 Content-Disposition 提取文件名
-        const contentDisposition = res.headers.get('Content-Disposition');
-        let filename = 'article.md';
-        if (contentDisposition) {
-          const match = contentDisposition.match(/filename\*=UTF-8''(.+)/);
-          if (match) {
-            filename = decodeURIComponent(match[1]);
-          }
+    .then(({ blob, contentDisposition }) => {
+      const downloadUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = downloadUrl;
+      // 从 Content-Disposition 提取文件名
+      let filename = 'article.md';
+      if (contentDisposition) {
+        const match = contentDisposition.match(/filename\*=UTF-8''(.+)/);
+        if (match) {
+          filename = decodeURIComponent(match[1]);
         }
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(downloadUrl);
-      });
-  } else {
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  }
+      }
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(downloadUrl);
+    })
+    .catch((error) => {
+      // 已 alert 过的错误不再重复提示
+      console.error('导出文章失败:', error);
+    });
 }

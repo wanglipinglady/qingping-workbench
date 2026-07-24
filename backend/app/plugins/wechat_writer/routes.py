@@ -4,12 +4,12 @@
 """
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query, Body
+from fastapi import APIRouter, Depends, Query, Body, Request, HTTPException, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.auth import get_current_user
+from app.core.auth import get_current_user, decode_access_token
 from app.core.exceptions import unified_response
 from app.plugins.user.models import User
 from app.plugins.wechat_writer.schemas import (
@@ -408,27 +408,60 @@ async def stream_session_post(
 async def export_article(
     session_id: int,
     format: str = Query("markdown", description="导出格式: markdown/txt"),
-    current_user: User = Depends(get_current_user),
+    token: Optional[str] = Query(None, description="JWT 认证令牌（直接链接下载时通过 query 传递）"),
+    request: Request = None,
     db: Session = Depends(get_db),
 ):
     """
     导出文章为 Markdown 或纯文本格式
 
+    认证方式：
+    1. 优先从 `token` query 参数获取（支持 `<a>` 链接直接下载）
+    2. 其次从 Authorization header 获取 Bearer token（标准方式）
+
     优先使用润色稿（polish），没有则使用初稿（draft）
     """
     from fastapi.responses import PlainTextResponse
+
+    current_user = None
+
+    # 方式1：从 query param 获取 token
+    if token:
+        payload = decode_access_token(token)
+        if payload:
+            user_id = int(payload.get("sub"))
+            current_user = db.query(User).filter(User.id == user_id).first()
+
+    # 方式2：从 Authorization header 获取
+    if not current_user and request:
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.startswith("Bearer "):
+            header_token = auth_header[7:]
+            payload = decode_access_token(header_token)
+            if payload:
+                user_id = int(payload.get("sub"))
+                current_user = db.query(User).filter(User.id == user_id).first()
+
+    if not current_user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="未提供有效的认证令牌，请登录后重试",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
 
     article_content, title = wechat_writer_service.export_article(
         db, current_user.id, session_id
     )
 
     if not article_content:
-        raise ValueError("暂无文章内容可导出，请先完成写作")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="暂无文章内容可导出，请先完成写作",
+        )
 
     filename = f"{title or 'article'}.md"
 
     if format == "txt":
-        # 移除 Markdown 标记
         import re
         txt_content = re.sub(r'^#{1,6}\s+', '', article_content, flags=re.MULTILINE)
         txt_content = re.sub(r'\*\*(.+?)\*\*', r'\1', txt_content)
