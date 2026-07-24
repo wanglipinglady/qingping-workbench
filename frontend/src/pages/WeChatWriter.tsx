@@ -587,6 +587,8 @@ export default function WeChatWriter() {
             </Button>
           </div>
         </div>
+      </Modal>
+
       {/* 目录选择弹窗 */}
       <Modal
         visible={showFolderModal}
