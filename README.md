@@ -79,12 +79,39 @@ npm run dev
 
 访问: http://localhost:5173
 
-### 三、一键启动（开发模式）
+### 三、一键启动（开发模式 · 跨平台）
+
+> **首次启动报错 `ModuleNotFoundError: No module named 'pydantic_settings'`？**  
+> 说明依赖未安装。使用下面的「一键启动」脚本可自动完成：Python 虚拟环境创建 + 依赖安装 + 配置复制 + 服务启动。
+
+| 操作系统 | 启动命令 | 入口文件 |
+|---------|---------|---------|
+| **macOS / Linux** | `python3 start.py` 或 `./start.sh` | `start.py` / `start.sh` |
+| **Windows** | 双击 `start.bat`，或在终端执行 `python start.py` | `start.bat`（内部调用 `start.py`） |
+
+**推荐使用 `start.py`**（跨平台 Python 脚本），它会自动：
+1. ✅ 检测 Python（>= 3.10）和 Node.js（>= 18）环境
+2. ✅ 创建 `backend/.venv` 虚拟环境并安装 `requirements.txt`
+3. ✅ 安装 `frontend/node_modules` 依赖
+4. ✅ 自动从 `.env.example` 复制 `.env`
+5. ✅ 同时启动后端（端口 8080）和前端（端口 5173）
+6. ✅ Ctrl+C 优雅停止所有服务
 
 ```bash
-chmod +x start.sh
-./start.sh
+# macOS / Linux
+python3 start.py
+
+# Windows（命令行）
+python start.py
+
+# Windows（资源管理器）
+# 双击 start.bat
 ```
+
+启动成功后访问：
+- 前端页面: http://localhost:5173
+- 后端 API: http://localhost:8080
+- API 文档: http://localhost:8080/docs
 
 ---
 
@@ -305,7 +332,9 @@ qingping-mvp/
 │   ├── update.sh
 │   └── backup.sh
 │
-├── start.sh                    # 一键启动（开发）
+├── start.py                    # 跨平台一键启动脚本（macOS / Windows / Linux）
+├── start.bat                   # Windows 启动入口（双击运行）
+├── start.sh                    # macOS / Linux 启动入口
 └── README.md
 ```
 
@@ -381,8 +410,16 @@ mkdir my_module
 
 ### 1. 启动报错 "No module named 'xxx'"
 
-安装缺失的依赖：
+依赖未安装。最简单的解决方式：使用跨平台启动脚本 `python3 start.py`（macOS/Linux）或 `python start.py` / 双击 `start.bat`（Windows），脚本会自动创建虚拟环境并安装依赖。
+
+如果想手动安装：
+
 ```bash
+cd backend
+# 推荐：使用虚拟环境
+python3 -m venv .venv
+source .venv/bin/activate   # macOS/Linux
+# .venv\Scripts\activate    # Windows
 pip install -r requirements.txt
 ```
 
@@ -402,6 +439,12 @@ pip install -r requirements.txt
 ### 5. 前端跨域问题
 
 确保后端 `.env` 中 `CORS_ORIGINS` 包含前端地址，或设为 `*`。
+
+### 6. Windows 系统启动方式
+
+- **方法 A**：双击 `start.bat`（最简单）
+- **方法 B**：命令行执行 `python start.py`
+- **注意**：不要直接双击 `.sh` 脚本，Windows 不识别；如需使用 Git Bash 运行 `start.sh`，请在 Git Bash 中执行 `./start.sh`
 
 ---
 
