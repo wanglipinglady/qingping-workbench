@@ -107,7 +107,13 @@ def check_version(name, cmd, min_major=None, version_arg='--version'):
 
 # ==================== 依赖安装 ====================
 def ensure_venv(backend_dir: Path):
-    """创建虚拟环境并安装后端依赖，返回 venv 中的 python 路径"""
+    """创建虚拟环境并安装后端依赖，返回 venv 中的 python 路径。
+
+    采用「幂等安装」策略：每次都执行 `pip install -r requirements.txt`，
+    pip 会自动跳过已安装且版本满足约束的包（耗时 < 10 秒）。
+    这样可以彻底避免「探针选错包」导致的漏装问题
+    （比如 fastapi 装了但 pydantic-settings 没装）。
+    """
     venv_dir = backend_dir / '.venv'
     py = get_python()
 
@@ -121,17 +127,22 @@ def ensure_venv(backend_dir: Path):
     else:
         venv_py = venv_dir / 'bin' / 'python'
 
-    # 检测依赖是否已安装（用 fastapi 作为探针）
-    yellow("[*] 检查后端依赖...")
-    ok, _ = run_quiet([str(venv_py), '-c', 'import fastapi'], timeout=10)
-    if ok:
-        green("[✓] 后端依赖已安装")
-    else:
-        yellow("[*] 安装后端依赖（首次需要 2~3 分钟）...")
-        # Windows 下 venv 中的 pip 也是 .exe
-        pip_cmd = [str(venv_py), '-m', 'pip', 'install', '-r', str(backend_dir / 'requirements.txt')]
-        subprocess.run(pip_cmd, check=True)
-        green("[✓] 后端依赖安装完成")
+    # 升级 pip（解决老版本 pip 解析依赖出错的问题）
+    yellow("[*] 升级 pip...")
+    subprocess.run(
+        [str(venv_py), '-m', 'pip', 'install', '--upgrade', 'pip'],
+        check=False, capture_output=True,
+    )
+
+    # 幂等安装：每次都执行 pip install -r requirements.txt
+    # pip 对已安装且满足约束的包是 no-op，速度很快
+    yellow("[*] 安装/校验后端依赖...")
+    pip_cmd = [
+        str(venv_py), '-m', 'pip', 'install',
+        '-r', str(backend_dir / 'requirements.txt'),
+    ]
+    subprocess.run(pip_cmd, check=True)
+    green("[✓] 后端依赖已就绪")
 
     return str(venv_py)
 
