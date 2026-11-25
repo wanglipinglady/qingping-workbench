@@ -64,29 +64,31 @@ class TestMenuData:
         """菜单项应转成可序列化字典，含 children"""
         pm = PluginManager()
         info = PluginInfo(
-            name="demo",
+            name="demo_test_plugin",
             menu_items=[
                 MenuItem(
-                    key="demo",
-                    label="演示",
+                    key="demo_test",
+                    label="演示测试",
                     icon="star",
-                    path="/demo",
+                    path="/demo-test",
                     order=5,
                     children=[
-                        MenuItem(key="demo-sub", label="子项", path="/demo/sub", order=1)
+                        MenuItem(key="demo-test-sub", label="子项", path="/demo-test/sub", order=1)
                     ],
                 )
             ],
         )
         pm.register_plugin(info)
 
-        data = pm.get_menu_data()
-        assert len(data) == 1
-        assert data[0]["key"] == "demo"
-        assert data[0]["label"] == "演示"
-        assert data[0]["path"] == "/demo"
-        assert data[0]["order"] == 5
-        assert data[0]["children"][0]["key"] == "demo-sub"
-
-        # 恢复单例状态，避免测试间污染
-        pm._plugins.pop("demo", None)
+        try:
+            data = pm.get_menu_data()
+            # 全量测试时单例里可能已有其他插件的菜单，只断言我们注册的那条
+            demo = next((m for m in data if m["key"] == "demo_test"), None)
+            assert demo is not None, "demo 菜单应出现在序列化结果中"
+            assert demo["label"] == "演示测试"
+            assert demo["path"] == "/demo-test"
+            assert demo["order"] == 5
+            assert demo["children"][0]["key"] == "demo-test-sub"
+        finally:
+            # 恢复单例状态，避免测试间污染
+            pm._plugins.pop("demo_test_plugin", None)
