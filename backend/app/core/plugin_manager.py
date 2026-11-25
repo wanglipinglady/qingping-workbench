@@ -98,6 +98,37 @@ class PluginManager:
         """
         return list(self._plugins.values())
 
+    def get_menu_data(self) -> List[Dict[str, Any]]:
+        """
+        获取可序列化的菜单数据（供前端动态渲染）
+
+        Returns:
+            菜单项字典列表，按 order 排序
+        """
+        return [
+            {
+                "key": m.key,
+                "label": m.label,
+                "icon": m.icon,
+                "path": m.path,
+                "order": m.order,
+                "children": [self._menu_to_dict(c) for c in m.children],
+            }
+            for m in self.get_all_menu_items()
+        ]
+
+    @staticmethod
+    def _menu_to_dict(m: "MenuItem") -> Dict[str, Any]:
+        """递归把 MenuItem 转成字典"""
+        return {
+            "key": m.key,
+            "label": m.label,
+            "icon": m.icon,
+            "path": m.path,
+            "order": m.order,
+            "children": [PluginManager._menu_to_dict(c) for c in m.children],
+        }
+
     def get_all_menu_items(self) -> List[MenuItem]:
         """
         获取所有插件的菜单项（按 order 排序）

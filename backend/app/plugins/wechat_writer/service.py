@@ -32,6 +32,12 @@ from app.plugins.wechat_writer.experts import (
 )
 from app.plugins.wechat_writer.obsidian_reader import obsidian_reader
 from app.plugins.wechat_writer.rag_helper import format_rag_context, build_search_queries
+from app.plugins.knowledge_base.models import KnowledgeBase
+from app.capabilities.rag.unified_search import (
+    search_collections,
+    norm_obsidian_result,
+    merge_results,
+)
 
 
 class WeChatWriterService:
@@ -335,7 +341,7 @@ class WeChatWriterService:
         rag_context = ""
         if current_state in ("research", "outline", "draft"):
             rag_context = self._build_rag_context(
-                user_id, session.topic, session.confirmed_topic,
+                db, user_id, session.topic, session.confirmed_topic,
                 obsidian_folder=session.obsidian_folder
             )
 
@@ -433,7 +439,7 @@ class WeChatWriterService:
         rag_context = ""
         if current_state in ("research", "outline", "draft"):
             rag_context = self._build_rag_context(
-                user_id, session.topic, session.confirmed_topic,
+                db, user_id, session.topic, session.confirmed_topic,
                 obsidian_folder=session.obsidian_folder
             )
 
@@ -554,7 +560,7 @@ class WeChatWriterService:
                 rag_context = ""
                 if to_state in ("research", "outline", "draft"):
                     rag_context = self._build_rag_context(
-                        user_id, session.topic, session.confirmed_topic,
+                        db, user_id, session.topic, session.confirmed_topic,
                         obsidian_folder=session.obsidian_folder
                     )
 
@@ -732,16 +738,19 @@ class WeChatWriterService:
 
     # ========== 辅助方法 ==========
 
-    def _build_rag_context(self, user_id: int, topic: str,
+    def _build_rag_context(self, db: Session, user_id: int, topic: str,
                             confirmed_topic: Optional[str] = None,
                             obsidian_folder: Optional[str] = None) -> str:
-        """构建 RAG 上下文（共用方法）
+        """构建 RAG 上下文（共用方法，统一检索入口）
 
         1. 先从本地 Obsidian 知识库搜索资料（支持按目录过滤）
-        2. 如果本地知识库找不到资料，使用 fallback 上下文，
+        2. 再从用户创建的结构化知识库（知识库模块上传的文档）检索
+        3. 两路结果经统一能力层合并、去重、标注来源后注入
+        4. 若都找不到资料，使用 fallback 上下文，
            告诉 AI 基于通用知识和网络公开信息输出资料卡片
 
         Args:
+            db: 数据库会话，用于查询用户的知识库集合
             obsidian_folder: 限制搜索的 Obsidian 目录路径（相对 Vault 根目录）
 
         Returns:
@@ -750,19 +759,46 @@ class WeChatWriterService:
         queries = build_search_queries(topic, confirmed_topic)
         folder_hint = f" [目录: {obsidian_folder}]" if obsidian_folder else ""
         print(f"[RAG] 搜索关键词: {queries}{folder_hint}")
+
+        # 查询用户的所有结构化知识库，作为统一检索的集合来源
+        kb_specs = []
+        try:
+            kbs = db.query(KnowledgeBase).filter(KnowledgeBase.user_id == user_id).all()
+            kb_specs = [
+                {
+                    "collection_name": f"kb_{kb.id}",
+                    "source": "knowledge_base",
+                    "source_label": f"知识库: {kb.name}",
+                }
+                for kb in kbs
+            ]
+        except Exception as e:
+            print(f"[RAG] 查询知识库列表失败: {e}")
+
         all_results = []
         for q in queries:
+            group = []
+            # 来源 1：Obsidian 笔记（保留目录过滤能力）
             try:
-                results = obsidian_reader.search(
+                obs_results = obsidian_reader.search(
                     user_id, q, top_k=5, folder_filter=obsidian_folder
                 )
-                all_results.extend(results)
+                group.extend(norm_obsidian_result(r) for r in obs_results)
             except Exception as e:
-                print(f"[RAG] 搜索失败 query='{q}': {e}")
+                print(f"[RAG] Obsidian 搜索失败 query='{q}': {e}")
+            # 来源 2：结构化知识库（统一检索入口）
+            if kb_specs:
+                try:
+                    group.extend(search_collections(kb_specs, q, top_k=5))
+                except Exception as e:
+                    print(f"[RAG] 知识库搜索失败 query='{q}': {e}")
+            all_results.append(group)
 
-        if all_results:
-            rag_context = format_rag_context(all_results, max_snippets=8)
-            print(f"[RAG] 检索到 {len(all_results)} 条本地资料，已格式化注入上下文")
+        # 统一合并：跨所有 query、所有来源去重，按相关度排序
+        merged = merge_results(all_results, top_k=8)
+        if merged:
+            rag_context = format_rag_context(merged, max_snippets=8)
+            print(f"[RAG] 检索到 {len(merged)} 条资料（含 Obsidian 与知识库），已格式化注入上下文")
             return rag_context
 
         # 本地知识库无资料时，使用 fallback 上下文，告诉 AI 用通用知识和网络资料

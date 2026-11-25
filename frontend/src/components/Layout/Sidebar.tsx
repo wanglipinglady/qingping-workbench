@@ -1,75 +1,28 @@
 /**
  * 侧边栏组件
  * 主导航菜单，支持折叠、当前页高亮
+ * 菜单项从后端 /api/plugins 动态获取（新增插件自动出现），
+ * 加载失败时回退到本地默认菜单，保证可用性。
  */
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
+import { getPlugins, type MenuItem } from '@/api/system';
+import { getMenuIcon } from './menuIcons';
 
-// 菜单项配置
-const menuItems = [
-  {
-    key: 'home',
-    label: '工作台',
-    path: '/home',
-    icon: (
-      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
-      </svg>
-    ),
-  },
-  {
-    key: 'knowledge',
-    label: '知识库',
-    path: '/knowledge',
-    icon: (
-      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
-      </svg>
-    ),
-  },
-  {
-    key: 'tech-experts',
-    label: '技术专家组',
-    path: '/tech-experts',
-    icon: (
-      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
-      </svg>
-    ),
-  },
-  {
-    key: 'wechat-writer',
-    label: '公众号写作',
-    path: '/wechat-writer',
-    icon: (
-      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-      </svg>
-    ),
-  },
+// 默认菜单（后端不可用时的兜底）
+const defaultMenuItems: MenuItem[] = [
+  { key: 'home', label: '工作台', icon: 'home', path: '/home', order: 0 },
+  { key: 'knowledge-base', label: '知识库', icon: 'book', path: '/knowledge-bases', order: 10 },
+  { key: 'tech-experts', label: '技术专家组', icon: 'brain', path: '/tech-experts', order: 20 },
+  { key: 'wechat-writer', label: '公众号写作', icon: 'edit', path: '/wechat-writer', order: 20 },
+  { key: 'user-profile', label: '个人中心', icon: 'user', path: '/profile', order: 100 },
 ];
 
-// 即将上线的功能（灰显）
+// 即将上线的功能（灰显，保持本地）
 const upcomingItems = [
-  {
-    key: 'projects',
-    label: '项目管理',
-    icon: (
-      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-      </svg>
-    ),
-  },
-  {
-    key: 'data-analysis',
-    label: '数据分析',
-    icon: (
-      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-      </svg>
-    ),
-  },
+  { key: 'projects', label: '项目管理', icon: 'calendar' },
+  { key: 'data-analysis', label: '数据分析', icon: 'chart' },
 ];
 
 interface SidebarProps {
@@ -82,6 +35,23 @@ interface SidebarProps {
 export default function Sidebar({ collapsed = false, onCollapse }: SidebarProps) {
   const location = useLocation();
   const [expanded, setExpanded] = useState(!collapsed);
+  const [menuItems, setMenuItems] = useState<MenuItem[]>(defaultMenuItems);
+
+  // 从后端加载动态菜单
+  useEffect(() => {
+    let cancelled = false;
+    getPlugins()
+      .then((data) => {
+        if (cancelled || !data?.menus?.length) return;
+        setMenuItems(data.menus);
+      })
+      .catch(() => {
+        // 后端不可达时保留默认菜单，不影响使用
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const handleToggle = () => {
     const newExpanded = !expanded;
@@ -116,20 +86,20 @@ export default function Sidebar({ collapsed = false, onCollapse }: SidebarProps)
 
       {/* 菜单区域 */}
       <nav className="flex-1 py-4 overflow-y-auto">
-        {/* 主菜单 */}
+        {/* 主菜单（后端动态） */}
         <div className="px-3 space-y-1">
           {menuItems.map((item) => (
             <Link
               key={item.key}
-              to={item.path}
+              to={item.path || '/home'}
               className={`flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors ${
-                isActive(item.path)
+                item.path && isActive(item.path)
                   ? 'bg-primary-50 text-primary-600 font-medium'
                   : 'text-text-secondary hover:bg-gray-50 hover:text-text'
               }`}
               title={!expanded ? item.label : undefined}
             >
-              <span className="flex-shrink-0">{item.icon}</span>
+              <span className="flex-shrink-0">{getMenuIcon(item.icon)}</span>
               {expanded && <span className="whitespace-nowrap">{item.label}</span>}
             </Link>
           ))}
@@ -154,7 +124,7 @@ export default function Sidebar({ collapsed = false, onCollapse }: SidebarProps)
               className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-gray-300 cursor-not-allowed"
               title={!expanded ? `${item.label}（即将上线）` : undefined}
             >
-              <span className="flex-shrink-0 opacity-50">{item.icon}</span>
+              <span className="flex-shrink-0 opacity-50">{getMenuIcon(item.icon)}</span>
               {expanded && (
                 <span className="whitespace-nowrap opacity-50">
                   {item.label}

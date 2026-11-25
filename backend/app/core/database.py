@@ -58,18 +58,54 @@ def init_db() -> None:
     """
     初始化数据库：创建所有表 + 初始化默认数据
     在应用启动时调用
+
+    模型导入改为遍历已注册插件的 models_module 动态完成：
+    新增插件只要在 plugin.py 里填好 models_module，建表无需改这里。
     """
-    # 导入所有模型，确保 Base 能识别到它们
-    # 注意：必须在调用 create_all 之前导入模型
-    from app.plugins.user import models as user_models  # noqa: F401
-    from app.plugins.knowledge_base import models as kb_models  # noqa: F401
-    from app.plugins.tech_experts import models as tech_models  # noqa: F401
-    from app.plugins.wechat_writer import models as wechat_models  # noqa: F401
+    # 动态导入所有插件的模型，确保 Base 能识别到它们
+    # 注意：必须先 ensure_plugins_loaded，再 create_all
+    loaded_models = import_plugin_models()
+
+    print(f"[数据库] 已导入 {len(loaded_models)} 个插件模型: {', '.join(loaded_models)}")
 
     Base.metadata.create_all(bind=engine)
 
     # 初始化默认管理员用户
     _init_default_user()
+
+
+def ensure_plugins_loaded() -> None:
+    """确保插件已被发现并注册（幂等，可安全多次调用）"""
+    from app.core.plugin_manager import plugin_manager
+
+    if plugin_manager.get_all_plugins():
+        return
+    plugin_manager.discover_plugins("app.plugins")
+
+
+def import_plugin_models() -> list[str]:
+    """
+    遍历已注册插件的 models_module 并动态导入模型。
+
+    Returns:
+        成功导入模型的插件名称列表
+    """
+    import importlib
+
+    from app.core.plugin_manager import plugin_manager
+
+    ensure_plugins_loaded()
+    loaded = []
+    for plugin in plugin_manager.get_all_plugins():
+        module_name = plugin.models_module
+        if not module_name:
+            continue
+        try:
+            importlib.import_module(module_name)
+            loaded.append(plugin.name)
+        except ImportError as e:
+            print(f"[警告] 导入插件 {plugin.name} 的模型失败: {e}")
+    return loaded
 
 
 def _init_default_user() -> None:

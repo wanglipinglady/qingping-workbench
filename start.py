@@ -25,6 +25,7 @@ import shutil
 import platform
 import subprocess
 import re
+import json
 from pathlib import Path
 
 # ==================== 颜色输出（兼容 Windows）====================
@@ -148,11 +149,18 @@ def ensure_venv(backend_dir: Path):
 
 
 def install_frontend_deps(frontend_dir: Path):
-    """安装前端依赖"""
+    """安装前端依赖：优先使用 npm ci（基于 lockfile 精确还原）"""
     yellow("[*] 检查前端依赖...")
     node_modules = frontend_dir / 'node_modules'
-    if node_modules.exists():
-        green("[✓] 前端依赖已安装")
+    lockfile = frontend_dir / 'package-lock.json'
+
+    if node_modules.exists() and lockfile.exists():
+        yellow("[*] node_modules 已存在，执行 npm ci 校验 lockfile 一致性...")
+        if IS_WINDOWS:
+            subprocess.run('npm ci', cwd=str(frontend_dir), shell=True, check=True)
+        else:
+            subprocess.run(['npm', 'ci'], cwd=str(frontend_dir), check=True)
+        green("[✓] 前端依赖已就绪（lockfile 一致）")
         return
 
     yellow("[*] 安装前端依赖（首次需要 1~2 分钟）...")
@@ -184,13 +192,33 @@ def main():
         if not (major == 3 and 10 <= minor <= 12):
             yellow(f"[!] 推荐 Python 3.10 ~ 3.12，当前是 3.{minor}（3.13 部分包缺 wheel）")
 
-    if not check_version("Node.js", 'node', min_major=18):
-        red("请先安装 Node.js >= 18，下载地址: https://nodejs.org/")
+    # 从唯一配置源读取 Node/npm 精确版本，避免启动脚本与 package.json 漂移
+    required_node = (SCRIPT_DIR / '.nvmrc').read_text(encoding='utf-8').strip()
+    package_config = json.loads(
+        (SCRIPT_DIR / 'frontend' / 'package.json').read_text(encoding='utf-8')
+    )
+    required_npm = package_config['packageManager'].split('@', 1)[1]
+    ok, node_ver = run_quiet(['node', '--version'], timeout=5)
+    if not ok:
+        red("[✗] 未检测到 Node.js")
         sys.exit(1)
-
-    if not check_version("npm", 'npm'):
-        red("npm 未安装（通常随 Node.js 一起安装）")
+    ok, npm_ver = run_quiet(['npm', '--version'], timeout=5)
+    if not ok:
+        red("[✗] 未检测到 npm")
         sys.exit(1)
+    node_clean = node_ver.lstrip('v').strip()
+    npm_clean = npm_ver.lstrip('v').strip()
+    if node_clean != required_node:
+        red(f"[✗] Node.js 版本不匹配: 当前 {node_clean}（需要精确为 {required_node}）")
+        yellow(f"[i] 建议使用 nvm: nvm install {required_node} && nvm use {required_node}")
+        yellow("[i] 项目根目录已提供 .nvmrc，在 macOS 运行 'nvm use' 即可临时切换")
+        sys.exit(1)
+    if npm_clean != required_npm:
+        red(f"[✗] npm 版本不匹配: 当前 {npm_clean}（需要精确为 {required_npm}）")
+        yellow(f"[i] npm {required_npm} 随 Node {required_node} 发布，切换 Node 后会自动匹配")
+        sys.exit(1)
+    green(f"[✓] Node.js: {node_ver}")
+    green(f"[✓] npm:     {npm_ver}")
 
     # ---------- 2. 准备配置文件 ----------
     bold("\n--- 2. 准备配置文件 ---")

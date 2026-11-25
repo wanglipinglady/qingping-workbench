@@ -20,9 +20,26 @@ import Loading from '@/components/Common/Loading';
 const pageTitles: Record<string, string> = {
   '/home': '工作台',
   '/knowledge': '知识库',
+  '/knowledge-bases': '知识库',
   '/tech-experts': '技术专家组',
   '/wechat-writer': '公众号写作',
+  '/profile': '个人中心',
 };
+
+/**
+ * 路由注册表
+ * 新增页面只需在这里加一行（path + 组件），无需改 <Routes> 结构。
+ * 说明：React 组件必须静态 import，因此用集中注册表而非完全动态加载；
+ * 这仍把"加一个页面"从改 3 处（路由/菜单/标题）减少到改 1 处。
+ */
+const routeRegistry: { path: string; element: React.ReactNode }[] = [
+  { path: '/home', element: <Home /> },
+  { path: '/knowledge', element: <KnowledgeBase /> },
+  // 兼容后端插件菜单声明的 path（/knowledge-bases）
+  { path: '/knowledge-bases', element: <KnowledgeBase /> },
+  { path: '/tech-experts', element: <TechExperts /> },
+  { path: '/wechat-writer', element: <WeChatWriter /> },
+];
 
 /**
  * 受保护的路由组件
@@ -88,10 +105,9 @@ function MainLayout() {
         {/* 页面内容 */}
         <main className="flex-1 overflow-auto">
           <Routes>
-            <Route path="/home" element={<Home />} />
-            <Route path="/knowledge" element={<KnowledgeBase />} />
-            <Route path="/tech-experts" element={<TechExperts />} />
-            <Route path="/wechat-writer" element={<WeChatWriter />} />
+            {routeRegistry.map((r) => (
+              <Route key={r.path} path={r.path} element={r.element} />
+            ))}
             <Route path="*" element={<Navigate to="/home" replace />} />
           </Routes>
         </main>

@@ -73,30 +73,20 @@ def create_app() -> FastAPI:
     async def get_plugins():
         """获取所有已加载的插件信息和菜单项"""
         plugins = plugin_manager.get_all_plugins()
-        menus = plugin_manager.get_all_menu_items()
 
-        plugin_list = []
-        for p in plugins:
-            plugin_list.append({
+        plugin_list = [
+            {
                 "name": p.name,
                 "description": p.description,
                 "version": p.version,
-            })
-
-        menu_list = []
-        for m in menus:
-            menu_list.append({
-                "key": m.key,
-                "label": m.label,
-                "icon": m.icon,
-                "path": m.path,
-                "order": m.order,
-            })
+            }
+            for p in plugins
+        ]
 
         return unified_response(
             data={
                 "plugins": plugin_list,
-                "menus": menu_list,
+                "menus": plugin_manager.get_menu_data(),
             }
         )
 

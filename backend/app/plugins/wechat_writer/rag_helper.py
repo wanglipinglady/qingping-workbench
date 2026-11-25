@@ -19,13 +19,13 @@ def format_rag_context(search_results: List[Dict[str, Any]], max_snippets: int =
     if not search_results:
         return ""
 
-    # 去重（同一篇文档只保留一条最相关的）
+    # 去重（同一来源 + 同一路径只保留一条最相关的）
     seen_paths = set()
     unique_results = []
     for r in search_results:
-        path = r.get("path", "")
-        if path not in seen_paths:
-            seen_paths.add(path)
+        key = (r.get("source", ""), r.get("path", ""))
+        if key not in seen_paths:
+            seen_paths.add(key)
             unique_results.append(r)
         if len(unique_results) >= max_snippets:
             break
@@ -33,11 +33,15 @@ def format_rag_context(search_results: List[Dict[str, Any]], max_snippets: int =
     if not unique_results:
         return ""
 
+    # 是否包含多来源（用于生成更准确的说明）
+    sources = {r.get("source", "") for r in unique_results}
+    multi_source = len(sources) > 1
+
     # 构建上下文
     lines = []
     lines.append("=" * 60)
-    lines.append("【从 Obsidian 知识库检索到的参考资料】")
-    lines.append(f"共检索到 {len(unique_results)} 篇相关笔记：")
+    lines.append("【从个人知识库检索到的参考资料】")
+    lines.append(f"共检索到 {len(unique_results)} 篇相关资料：")
     lines.append("")
 
     for i, r in enumerate(unique_results, 1):
@@ -46,6 +50,7 @@ def format_rag_context(search_results: List[Dict[str, Any]], max_snippets: int =
         content = r.get("content", "")
         score = r.get("score", 0)
         date = r.get("date", "")
+        source_label = r.get("source_label", "")
 
         # 截断过长的内容
         if len(content) > 500:
@@ -53,7 +58,9 @@ def format_rag_context(search_results: List[Dict[str, Any]], max_snippets: int =
 
         lines.append(f"--- 资料 #{i} ---")
         lines.append(f"📄 标题：{title}")
-        lines.append(f"📁 来源：{path}")
+        lines.append(f"📁 来源：{source_label or path}")
+        if source_label and path:
+            lines.append(f"📂 位置：{path}")
         if date:
             lines.append(f"📅 日期：{date}")
         lines.append(f"🔍 相关度：{score:.2f}")
@@ -64,11 +71,13 @@ def format_rag_context(search_results: List[Dict[str, Any]], max_snippets: int =
     lines.append("=" * 60)
     lines.append("")
     lines.append("【使用说明】")
-    lines.append("1. 以上资料来自用户的 Obsidian 个人知识库，可信度较高")
+    lines.append("1. 以上资料来自用户的个人知识库（Obsidian 笔记 / 结构化知识库文档），可信度较高")
     lines.append("2. 请优先引用这些资料中的观点和数据作为论据")
     lines.append("3. 引用时请注明来源（资料编号或文档标题）")
     lines.append("4. 如果资料中的内容与你的知识冲突，以资料内容为准并标注")
     lines.append("5. 如果资料不足以支撑写作，请明确指出缺少哪些方面的信息")
+    if multi_source:
+        lines.append("6. 资料来自多个来源，请留意每条资料标注的来源，避免混淆")
 
     return "\n".join(lines)
 

@@ -7,6 +7,8 @@
 import sys
 import os
 import platform
+import json
+import subprocess
 from pathlib import Path
 
 # ==================== 颜色输出 ====================
@@ -199,28 +201,40 @@ def main():
 
     os.chdir(project_root)
 
-    # Node 版本检测
-    import subprocess
+    # 从 `.nvmrc` 与 packageManager 读取唯一版本基线
+    required_node = (project_root / ".nvmrc").read_text(encoding="utf-8").strip()
+    package_config = json.loads(
+        (frontend_dir / "package.json").read_text(encoding="utf-8")
+    )
+    required_npm = package_config["packageManager"].split("@", 1)[1]
     try:
-        result = subprocess.run(["node", "--version"], capture_output=True, text=True, timeout=5)
-        node_ver = result.stdout.strip().lstrip("v")
-        parts = node_ver.split(".")
-        major = int(parts[0]) if parts else 0
+        node_proc = subprocess.run(["node", "--version"], capture_output=True, text=True, timeout=5)
+        node_ver = node_proc.stdout.strip().lstrip("v")
         check(
-            f"Node.js 版本: {node_ver}",
-            major >= 18,
-            "建议 Node.js >= 18，或已降级 Vite 到 4.x 适配",
-            warning=True
+            f"Node.js 版本: {node_ver}（要求 {required_node}）",
+            node_ver == required_node,
+            f"Node.js 必须精确为 {required_node}，可通过 .nvmrc 或 'nvm use' 切换",
         )
     except (FileNotFoundError, subprocess.TimeoutExpired):
         fail("Node.js 未安装或不在 PATH 中")
+
+    try:
+        npm_proc = subprocess.run(["npm", "--version"], capture_output=True, text=True, timeout=5)
+        npm_ver = npm_proc.stdout.strip().lstrip("v")
+        check(
+            f"npm 版本: {npm_ver}（要求 {required_npm}）",
+            npm_ver == required_npm,
+            f"npm 必须精确为 {required_npm}，随 Node {required_node} 自动匹配",
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        fail("npm 未安装或不在 PATH 中")
 
     # 前端依赖检测
     node_modules = frontend_dir / "node_modules"
     check(
         "前端依赖已安装 (node_modules 存在)",
         node_modules.exists(),
-        "请执行: cd frontend && npm install",
+        "请执行: cd frontend && npm ci",
         warning=True
     )
 

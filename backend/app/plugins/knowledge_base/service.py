@@ -542,15 +542,22 @@ class KnowledgeBaseService:
         )
 
         # 格式化结果
+        # 注意：vector_store.search_with_score() 返回的是 {id, content, metadata, score}，
+        # 其中 score = 1/(1+distance)，不直接返回 distance。这里兼容两种来源：
+        # 若结果自带 distance 则直接用；否则由 score 反推，保证 schema 的必填字段有值。
         search_items = []
         for item in results:
             metadata = item.get("metadata", {})
+            score = item["score"]
+            distance = item.get("distance")
+            if distance is None:
+                distance = (1.0 / score - 1.0) if score > 0 else 1.0
             search_items.append(
                 SearchResultItem(
                     id=item["id"],
                     content=item["content"],
-                    score=item["score"],
-                    distance=item["distance"],
+                    score=score,
+                    distance=distance,
                     document_id=metadata.get("document_id"),
                     document_name=metadata.get("document_name"),
                     chunk_index=metadata.get("chunk_index"),

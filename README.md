@@ -21,7 +21,7 @@
 
 ### 前端
 - **框架**: React 18 + TypeScript
-- **构建工具**: Vite 5
+- **构建工具**: Vite 4.5.14（精确锁定）
 - **样式**: Tailwind CSS 3
 - **状态管理**: Zustand
 - **开发端口**: 5173
@@ -32,12 +32,50 @@
 
 ### 环境要求
 
-- Python 3.10 ~ 3.13
-- Node.js 18+（前端开发）
+- Python 3.10 ~ 3.12（**推荐 3.11**，3.13 上部分包缺 wheel）
+- **Node.js 16.15.0 + npm 8.5.5**（前端开发，精确锁定）
+  - 根目录已提供 `.nvmrc`（=`16.15.0`）
+  - `frontend/package.json` 中 `engines` + `packageManager` 已严格声明
+  - `frontend/.npmrc` 开启 `engine-strict` 与 `save-exact`，不达标会直接报错
 - MySQL 8.0（生产部署，本地开发可用 SQLite）
 - MiniMax API Key（[注册获取](https://www.minimaxi.com/)）
 
-**注意**: 某些 Python 包（numpy、chromadb）在最新的 Python 3.13 上可能缺少预编译 wheel，如果你遇到安装错误，推荐降级到 Python 3.11 / 3.12 会更顺畅。
+> **Node 版本规则读取顺序**：`.nvmrc`（nvm 自动切换）→ `frontend/package.json` 的 `engines` + `packageManager` → `frontend/.npmrc` 的 `engine-strict=true`（CI/脚本安装时强制校验）。
+
+#### Mac 临时切换 Node 版本（不影响全局默认）
+
+如果你的 Mac 上默认 nvm 版本是其他 Node（如 18/20/22），但**不想修改全局默认**，只想在当前 shell 临时切换：
+
+```bash
+# 进入项目根目录（会读取 .nvmrc）
+cd qingping-workbench/qingping-workbench
+
+# 方式 A：切换当前 shell（推荐，不修改 nvm 的全局默认版本）
+nvm use                  # 自动读 .nvmrc，切到 16.15.0
+node -v                  # v16.15.0
+npm -v                   # 8.5.5
+
+# 方式 B：不切换当前 shell，直接让指定版本执行命令
+nvm exec 16.15.0 node -v
+nvm exec 16.15.0 npm --prefix frontend run build
+
+# 关闭当前终端后，新终端会继续使用 Mac 原来的默认 Node 版本
+# 也可在当前终端手动恢复：nvm use default
+```
+
+**验证一切就绪**：
+
+```bash
+# 1. Node 版本
+node -v       # 应输出 v16.15.0
+npm -v        # 应输出 8.5.5
+
+# 2. 前端依赖锁定（前端目录下执行）
+cd frontend
+npm ci        # 严格按 package-lock.json 还原，engines 不达标会立即报错
+```
+
+**注意**：某些 Python 包（numpy、chromadb）在最新的 Python 3.13 上可能缺少预编译 wheel，如果你遇到安装错误，推荐降级到 Python 3.11 / 3.12 会更顺畅。
 
 ### 一、后端启动
 
@@ -66,8 +104,9 @@ python main.py
 ```bash
 cd frontend
 
-# 1. 安装依赖
-npm install
+# 1. 安装依赖（package-lock.json 已纳入版本控制，统一使用 npm ci）
+#    npm ci 会校验 package-lock.json 与 package.json 一致，且 engines 不达标会立即报错
+npm ci
 
 # 2. 配置环境变量
 cp .env.example .env
@@ -76,6 +115,8 @@ cp .env.example .env
 # 3. 启动开发服务器
 npm run dev
 ```
+
+> **安装脚本**：跨平台脚本 `start.py` / `start.bat` / `start.sh` 已统一改为先 `npm ci`，仅当 `node_modules` 与 `package-lock.json` 任一缺失时才降级为 `npm install`。
 
 访问: http://localhost:5173
 
@@ -90,9 +131,9 @@ npm run dev
 | **Windows** | 双击 `start.bat`，或在终端执行 `python start.py` | `start.bat`（内部调用 `start.py`） |
 
 **推荐使用 `start.py`**（跨平台 Python 脚本），它会自动：
-1. ✅ 检测 Python（>= 3.10）和 Node.js（>= 18）环境
+1. ✅ 检测 Python（>= 3.10）和 Node.js（精确 16.15.0 / npm 8.5.5）环境
 2. ✅ 创建 `backend/.venv` 虚拟环境并安装 `requirements.txt`
-3. ✅ 安装 `frontend/node_modules` 依赖
+3. ✅ 安装 `frontend/node_modules` 依赖（基于 `package-lock.json` 执行 `npm ci` 精确还原；`engine-strict=true` 时 Node 版本不达标会立即报错）
 4. ✅ 自动从 `.env.example` 复制 `.env`
 5. ✅ 同时启动后端（端口 8080）和前端（端口 5173）
 6. ✅ Ctrl+C 优雅停止所有服务
@@ -193,7 +234,7 @@ systemctl start qingping-backend
 cd /opt/qingping-mvp/frontend
 
 # 安装依赖并构建
-npm install
+npm ci
 npm run build
 
 # 方式 A：使用 Nginx 托管静态文件
@@ -335,6 +376,7 @@ qingping-mvp/
 ├── start.py                    # 跨平台一键启动脚本（macOS / Windows / Linux）
 ├── start.bat                   # Windows 启动入口（双击运行）
 ├── start.sh                    # macOS / Linux 启动入口
+├── .nvmrc                      # Node.js 版本固定（16.15.0），nvm 自动切换
 └── README.md
 ```
 
@@ -408,7 +450,19 @@ mkdir my_module
 
 ## 常见问题
 
-### 1. 启动报错 "No module named 'xxx'"
+### 1. 启动报错 "Node.js 版本不匹配"
+
+脚本会强制要求 `Node.js = 16.15.0` / `npm = 8.5.5`（Vite 4.x 与 React 18 在 Node 16 上最稳定）。若提示不匹配：
+
+```bash
+# 推荐：使用 nvm（项目根目录已提供 .nvmrc）
+nvm install 16.15.0
+nvm use                # 自动读取 .nvmrc 切换版本
+
+# 或者手动从 nodejs.org 下载 Node 16.15.0 安装包覆盖安装
+```
+
+### 2. 启动报错 "No module named 'xxx'"
 
 依赖未安装。最简单的解决方式：使用跨平台启动脚本 `python3 start.py`（macOS/Linux）或 `python start.py` / 双击 `start.bat`（Windows），脚本会自动创建虚拟环境并安装依赖。
 
