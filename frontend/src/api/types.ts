@@ -71,9 +71,8 @@ export interface KnowledgeBase {
   id: number;
   name: string;
   description?: string;
-  document_count: number;
-  is_public: boolean;
-  created_by: number;
+  doc_count: number;
+  user_id: number;
   created_at: string;
   updated_at: string;
 }
@@ -82,38 +81,35 @@ export interface KnowledgeBase {
 export interface CreateKnowledgeBaseRequest {
   name: string;
   description?: string;
-  is_public?: boolean;
 }
 
 /** 更新知识库请求 */
 export interface UpdateKnowledgeBaseRequest {
   name?: string;
   description?: string;
-  is_public?: boolean;
 }
 
 /** 文档 */
 export interface Document {
   id: number;
-  knowledge_base_id: number;
-  title: string;
-  file_name: string;
+  kb_id: number;
+  filename: string;
   file_type: string;
   file_size: number;
   chunk_count: number;
-  status: 'pending' | 'processing' | 'completed' | 'failed';
+  status: 'processing' | 'ready' | 'failed';
   created_at: string;
-  updated_at: string;
 }
 
 /** 搜索结果 */
 export interface SearchResult {
-  id: number;
-  document_id: number;
-  document_title: string;
+  id: string;
+  document_id?: number;
+  document_name?: string;
   content: string;
-  similarity: number;
-  chunk_index: number;
+  score: number;
+  distance?: number;
+  chunk_index?: number;
 }
 
 /** 搜索请求 */
@@ -121,6 +117,13 @@ export interface SearchRequest {
   query: string;
   knowledge_base_id?: number;
   top_k?: number;
+}
+
+/** 搜索响应 */
+export interface SearchResponse {
+  query: string;
+  results: SearchResult[];
+  total: number;
 }
 
 // ==================== 技术专家组相关类型 ====================

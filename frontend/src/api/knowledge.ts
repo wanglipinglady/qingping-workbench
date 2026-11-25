@@ -6,10 +6,10 @@ import { get, post, put, del, upload } from './index';
 import type {
   KnowledgeBase,
   Document,
-  SearchResult,
   CreateKnowledgeBaseRequest,
   UpdateKnowledgeBaseRequest,
   SearchRequest,
+  SearchResponse,
   PaginatedResponse,
   PaginationParams,
   DashboardStats,
@@ -23,7 +23,7 @@ import type {
 export function getKnowledgeBases(
   params?: PaginationParams
 ): Promise<PaginatedResponse<KnowledgeBase>> {
-  return get<PaginatedResponse<KnowledgeBase>>('/knowledge/bases', params);
+  return get<PaginatedResponse<KnowledgeBase>>('/knowledge-bases', params);
 }
 
 /**
@@ -31,7 +31,7 @@ export function getKnowledgeBases(
  * @param id 知识库 ID
  */
 export function getKnowledgeBase(id: number): Promise<KnowledgeBase> {
-  return get<KnowledgeBase>(`/knowledge/bases/${id}`);
+  return get<KnowledgeBase>(`/knowledge-bases/${id}`);
 }
 
 /**
@@ -41,7 +41,7 @@ export function getKnowledgeBase(id: number): Promise<KnowledgeBase> {
 export function createKnowledgeBase(
   data: CreateKnowledgeBaseRequest
 ): Promise<KnowledgeBase> {
-  return post<KnowledgeBase>('/knowledge/bases', data);
+  return post<KnowledgeBase>('/knowledge-bases', data);
 }
 
 /**
@@ -53,7 +53,7 @@ export function updateKnowledgeBase(
   id: number,
   data: UpdateKnowledgeBaseRequest
 ): Promise<KnowledgeBase> {
-  return put<KnowledgeBase>(`/knowledge/bases/${id}`, data);
+  return put<KnowledgeBase>(`/knowledge-bases/${id}`, data);
 }
 
 /**
@@ -61,7 +61,7 @@ export function updateKnowledgeBase(
  * @param id 知识库 ID
  */
 export function deleteKnowledgeBase(id: number): Promise<void> {
-  return del<void>(`/knowledge/bases/${id}`);
+  return del<void>(`/knowledge-bases/${id}`);
 }
 
 /**
@@ -74,18 +74,11 @@ export function getDocuments(
   params?: PaginationParams
 ): Promise<PaginatedResponse<Document>> {
   return get<PaginatedResponse<Document>>(
-    `/knowledge/bases/${knowledgeBaseId}/documents`,
+    `/knowledge-bases/${knowledgeBaseId}/documents`,
     params
   );
 }
 
-/**
- * 获取文档详情
- * @param documentId 文档 ID
- */
-export function getDocument(documentId: number): Promise<Document> {
-  return get<Document>(`/knowledge/documents/${documentId}`);
-}
 
 /**
  * 上传文档
@@ -102,7 +95,7 @@ export function uploadDocument(
   formData.append('file', file);
 
   return upload<Document>(
-    `/knowledge/bases/${knowledgeBaseId}/documents/upload`,
+    `/knowledge-bases/${knowledgeBaseId}/documents/upload`,
     formData,
     onProgress
   );
@@ -110,18 +103,20 @@ export function uploadDocument(
 
 /**
  * 删除文档
- * @param documentId 文档 ID
+ * @param kbId 知识库 ID
+ * @param docId 文档 ID
  */
-export function deleteDocument(documentId: number): Promise<void> {
-  return del<void>(`/knowledge/documents/${documentId}`);
+export function deleteDocument(kbId: number, docId: number): Promise<void> {
+  return del<void>(`/knowledge-bases/${kbId}/documents/${docId}`);
 }
 
 /**
  * 搜索知识库
  * @param data 搜索参数
  */
-export function searchKnowledge(data: SearchRequest): Promise<SearchResult[]> {
-  return post<SearchResult[]>('/knowledge/search', data);
+export function searchKnowledge(data: SearchRequest): Promise<SearchResponse> {
+  const { knowledge_base_id, ...body } = data;
+  return post<SearchResponse>(`/knowledge-bases/${knowledge_base_id}/search`, body);
 }
 
 /**

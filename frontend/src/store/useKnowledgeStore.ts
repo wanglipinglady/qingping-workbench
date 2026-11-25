@@ -82,7 +82,7 @@ interface KnowledgeActions {
     onProgress?: (progress: number) => void
   ) => Promise<Document>;
   /** 删除文档 */
-  deleteDoc: (documentId: number) => Promise<void>;
+  deleteDoc: (kbId: number, docId: number) => Promise<void>;
   /** 搜索知识库 */
   search: (data: SearchRequest) => Promise<SearchResult[]>;
   /** 清除搜索结果 */
@@ -245,10 +245,10 @@ export const useKnowledgeStore = create<KnowledgeStore>((set, get) => ({
   },
 
   // 删除文档
-  deleteDoc: async (documentId: number) => {
-    await deleteDocument(documentId);
+  deleteDoc: async (kbId: number, docId: number) => {
+    await deleteDocument(kbId, docId);
     set((state) => ({
-      documents: state.documents.filter((doc) => doc.id !== documentId),
+      documents: state.documents.filter((doc) => doc.id !== docId),
     }));
   },
 
@@ -257,12 +257,12 @@ export const useKnowledgeStore = create<KnowledgeStore>((set, get) => ({
     set((state) => ({ loading: { ...state.loading, search: true }, error: null }));
 
     try {
-      const results = await searchKnowledge(data);
+      const response = await searchKnowledge(data);
       set((state) => ({
-        searchResults: results,
+        searchResults: response.results,
         loading: { ...state.loading, search: false },
       }));
-      return results;
+      return response.results;
     } catch (error) {
       const message = error instanceof Error ? error.message : '搜索失败';
       set((state) => ({ loading: { ...state.loading, search: false }, error: message }));

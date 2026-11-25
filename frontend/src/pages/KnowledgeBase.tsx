@@ -182,7 +182,7 @@ export default function KnowledgeBase() {
                     <span className="font-medium truncate">{kb.name}</span>
                   </div>
                   <div className="text-xs text-text-tertiary ml-6">
-                    {kb.document_count} 篇文档
+                    {kb.doc_count} 篇文档
                   </div>
                 </button>
               ))}
@@ -265,15 +265,15 @@ export default function KnowledgeBase() {
                               <span className="text-2xl">{fileInfo.icon}</span>
                               <div className="flex-1 min-w-0">
                                 <h4 className="font-medium text-text truncate">
-                                  {result.document_title}
+                                  {result.document_name}
                                 </h4>
                                 <div className="flex items-center gap-3 mt-1 text-xs text-text-tertiary">
-                                  <span>第 {result.chunk_index + 1} 段</span>
-                                  <span>相似度: {(result.similarity * 100).toFixed(1)}%</span>
+                                  <span>第 {(result.chunk_index ?? 0) + 1} 段</span>
+                                  <span>相似度: {(result.score * 100).toFixed(1)}%</span>
                                 </div>
                               </div>
                               <div className="px-2 py-1 bg-primary-50 text-primary-600 text-xs rounded-full">
-                                {(result.similarity * 100).toFixed(0)}%
+                                {(result.score * 100).toFixed(0)}%
                               </div>
                             </div>
                             <p className="text-sm text-text-secondary leading-relaxed line-clamp-3">
@@ -324,10 +324,10 @@ export default function KnowledgeBase() {
                               <span className="text-3xl">{fileInfo.icon}</span>
                               <div className="flex-1 min-w-0">
                                 <h4 className="font-medium text-text truncate group-hover:text-primary-600 transition-colors">
-                                  {doc.title}
+                                  {doc.filename}
                                 </h4>
                                 <p className="text-xs text-text-tertiary mt-0.5 truncate">
-                                  {doc.file_name}
+                                  {doc.filename}
                                 </p>
                               </div>
                             </div>
@@ -336,16 +336,13 @@ export default function KnowledgeBase() {
                               <span>{formatDate(doc.created_at, 'MM-DD')}</span>
                             </div>
                             {/* 处理状态 */}
-                            {doc.status !== 'completed' && (
+                            {doc.status !== 'ready' && (
                               <div className="mt-2 pt-2 border-t border-gray-50">
                                 {doc.status === 'processing' && (
                                   <span className="text-xs text-accent-600 flex items-center gap-1">
                                     <span className="w-1.5 h-1.5 bg-accent-500 rounded-full animate-pulse" />
                                     处理中
                                   </span>
-                                )}
-                                {doc.status === 'pending' && (
-                                  <span className="text-xs text-text-tertiary">等待处理</span>
                                 )}
                                 {doc.status === 'failed' && (
                                   <span className="text-xs text-danger-500">处理失败</span>
