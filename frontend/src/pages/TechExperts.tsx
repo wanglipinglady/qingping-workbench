@@ -6,28 +6,51 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useTechExpertsStore } from '@/store/useTechExpertsStore';
-import { useKnowledgeStore } from '@/store/useKnowledgeStore';
+import { getChatStreamUrl } from '@/api/techExperts';
 import Button from '@/components/Common/Button';
 import Modal from '@/components/Common/Modal';
 import Input from '@/components/Common/Input';
 import MarkdownRender from '@/components/MarkdownRender';
 import { useSSE } from '@/hooks/useSSE';
 import { formatDate } from '@/utils/format';
-import type { ExpertPhase, ExpertRole, ExpertMessage } from '@/api/types';
+import type { TechExpertState, ExpertType, ExpertMessage } from '@/api/types';
 
-// 阶段配置
-const phases: { key: ExpertPhase; label: string; icon: string }[] = [
-  { key: 'architecture', label: '架构设计', icon: '🏗️' },
-  { key: 'implementation', label: '代码实现', icon: '💻' },
-  { key: 'review', label: '代码审查', icon: '🔍' },
+// 状态顺序（含 idle/done，用于进度判断）
+const stateOrder: TechExpertState[] = ['idle', 'arch_design', 'code_impl', 'code_review', 'testing', 'done'];
+
+// 状态中文名
+const STATE_LABELS: Record<TechExpertState, string> = {
+  idle: '初始化',
+  arch_design: '架构设计',
+  code_impl: '代码实现',
+  code_review: '代码审查',
+  testing: '测试验证',
+  done: '已完成',
+};
+
+// 状态徽标颜色
+const stateColor: Record<TechExpertState, string> = {
+  idle: 'bg-gray-100 text-gray-600',
+  arch_design: 'bg-purple-100 text-purple-600',
+  code_impl: 'bg-primary-100 text-primary-600',
+  code_review: 'bg-accent-100 text-accent-600',
+  testing: 'bg-danger-100 text-danger-600',
+  done: 'bg-green-100 text-green-600',
+};
+
+// 阶段配置（工作流四个阶段）
+const phases: { key: TechExpertState; label: string; icon: string }[] = [
+  { key: 'arch_design', label: '架构设计', icon: '🏗️' },
+  { key: 'code_impl', label: '代码实现', icon: '💻' },
+  { key: 'code_review', label: '代码审查', icon: '🔍' },
   { key: 'testing', label: '测试验证', icon: '🧪' },
 ];
 
-// 专家角色配置
-const expertRoles: { key: ExpertRole; name: string; color: string; borderColor: string; avatar: string }[] = [
+// 专家类型配置
+const expertRoles: { key: ExpertType; name: string; color: string; borderColor: string; avatar: string }[] = [
   { key: 'architect', name: '架构师', color: 'bg-purple-500', borderColor: 'border-l-purple-500', avatar: '👨‍🎨' },
-  { key: 'developer', name: '开发工程师', color: 'bg-primary-500', borderColor: 'border-l-primary-500', avatar: '👨‍💻' },
-  { key: 'reviewer', name: '代码审查员', color: 'bg-accent-500', borderColor: 'border-l-accent-500', avatar: '🧐' },
+  { key: 'coder', name: '程序员', color: 'bg-primary-500', borderColor: 'border-l-primary-500', avatar: '👨‍💻' },
+  { key: 'reviewer', name: '审查员', color: 'bg-accent-500', borderColor: 'border-l-accent-500', avatar: '🧐' },
   { key: 'tester', name: '测试工程师', color: 'bg-danger-500', borderColor: 'border-l-danger-500', avatar: '🧪' },
 ];
 
@@ -39,6 +62,7 @@ export default function TechExperts() {
     currentExpertRole,
     loading,
     fetchSessions,
+    fetchSession,
     createSessionItem,
     setCurrentSession,
     fetchMessages,
@@ -46,34 +70,46 @@ export default function TechExperts() {
     addStreamingMessage,
     updateStreamingMessage,
     finishStreaming,
-    doPhaseAction,
+    doConfirmState,
+    doRollbackState,
     doSwitchExpert,
-    setCurrentExpertRole,
+    stateInfo,
+    fetchStateInfo,
   } = useTechExpertsStore();
-
-  const { knowledgeBases, fetchKnowledgeBases } = useKnowledgeStore();
 
   const [showNewSessionModal, setShowNewSessionModal] = useState(false);
   const [newSessionTitle, setNewSessionTitle] = useState('');
-  const [newSessionKbId, setNewSessionKbId] = useState<number | undefined>();
   const [inputValue, setInputValue] = useState('');
   const [showExpertDropdown, setShowExpertDropdown] = useState(false);
-  const [showKbDropdown, setShowKbDropdown] = useState(false);
+  const [showRollbackDropdown, setShowRollbackDropdown] = useState(false);
   const [showInsertCode, setShowInsertCode] = useState(false);
   const [codeContent, setCodeContent] = useState('');
   const [codeLanguage, setCodeLanguage] = useState('python');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const expertDropdownRef = useRef<HTMLDivElement>(null);
-  const kbDropdownRef = useRef<HTMLDivElement>(null);
+  const currentSessionIdRef = useRef<number | null>(null);
+  const rollbackDropdownRef = useRef<HTMLDivElement>(null);
 
   // SSE Hook
-  const { isConnected, startStream, stopStream } = useSSE({
+  const { startStream } = useSSE({
     onMessage: (data) => {
-      if (data.content) {
-        updateStreamingMessage(data.content, true);
-      }
-      if (data.done) {
+      const payload = data as { event?: string; data?: Record<string, unknown> };
+      const event = payload.event;
+      const eventData = payload.data || {};
+
+      if (event === 'message_chunk' && typeof eventData.content === 'string') {
+        updateStreamingMessage(eventData.content, true);
+      } else if (event === 'message_end') {
+        finishStreaming();
+        const sid = currentSessionIdRef.current;
+        if (sid !== null) {
+          fetchSession(sid);
+          fetchMessages(sid);
+          fetchStateInfo(sid);
+        }
+      } else if (event === 'error') {
+        console.error('SSE 错误:', eventData.message);
         finishStreaming();
       }
     },
@@ -86,8 +122,12 @@ export default function TechExperts() {
   // 初始化
   useEffect(() => {
     fetchSessions();
-    fetchKnowledgeBases();
-  }, [fetchSessions, fetchKnowledgeBases]);
+  }, [fetchSessions]);
+
+  // 同步当前会话 id 到 ref（供 SSE 回调使用）
+  useEffect(() => {
+    currentSessionIdRef.current = currentSession?.id ?? null;
+  }, [currentSession]);
 
   // 自动滚动到底部
   useEffect(() => {
@@ -100,8 +140,8 @@ export default function TechExperts() {
       if (expertDropdownRef.current && !expertDropdownRef.current.contains(e.target as Node)) {
         setShowExpertDropdown(false);
       }
-      if (kbDropdownRef.current && !kbDropdownRef.current.contains(e.target as Node)) {
-        setShowKbDropdown(false);
+      if (rollbackDropdownRef.current && !rollbackDropdownRef.current.contains(e.target as Node)) {
+        setShowRollbackDropdown(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
@@ -117,10 +157,10 @@ export default function TechExperts() {
   }, [inputValue]);
 
   // 获取阶段状态
-  const getPhaseStatus = (phase: ExpertPhase): 'completed' | 'current' | 'pending' => {
+  const getPhaseStatus = (phase: TechExpertState): 'completed' | 'current' | 'pending' => {
     if (!currentSession) return 'pending';
-    const currentIndex = phases.findIndex((p) => p.key === currentSession.current_phase);
-    const phaseIndex = phases.findIndex((p) => p.key === phase);
+    const currentIndex = stateOrder.indexOf(currentSession.current_state);
+    const phaseIndex = stateOrder.indexOf(phase);
     if (phaseIndex < currentIndex) return 'completed';
     if (phaseIndex === currentIndex) return 'current';
     return 'pending';
@@ -132,11 +172,9 @@ export default function TechExperts() {
     try {
       const session = await createSessionItem({
         title: newSessionTitle.trim(),
-        knowledge_base_id: newSessionKbId,
       });
       setShowNewSessionModal(false);
       setNewSessionTitle('');
-      setNewSessionKbId(undefined);
       await fetchMessages(session.id);
     } catch (error) {
       console.error('创建会话失败:', error);
@@ -149,6 +187,7 @@ export default function TechExperts() {
     if (session) {
       setCurrentSession(session);
       await fetchMessages(sessionId);
+      await fetchStateInfo(sessionId);
     }
   };
 
@@ -165,61 +204,44 @@ export default function TechExperts() {
     // 开始流式输出
     addStreamingMessage(currentExpertRole);
 
-    // 构建 SSE URL
-    const baseUrl = import.meta.env.VITE_API_BASE_URL || '/api';
-    const token = localStorage.getItem('user-storage') 
-      ? JSON.parse(localStorage.getItem('user-storage') || '{}').state?.token 
-      : '';
-    const url = `${baseUrl}/tech-experts/stream?session_id=${currentSession.id}&content=${encodeURIComponent(content)}&expert_role=${currentExpertRole}&token=${token}`;
-
-    startStream(url);
+    startStream(getChatStreamUrl(currentSession.id), { body: { message: content } });
   };
 
   // 确认进入下一阶段
   const handleConfirmPhase = async () => {
     if (!currentSession) return;
     try {
-      await doPhaseAction({
-        session_id: currentSession.id,
-        action: 'confirm',
-      });
-      // 切换到对应专家
-      const nextPhaseIndex = phases.findIndex((p) => p.key === currentSession.current_phase) + 1;
-      if (nextPhaseIndex < phases.length) {
-        const nextPhase = phases[nextPhaseIndex].key;
-        const roleMap: Record<ExpertPhase, ExpertRole> = {
-          architecture: 'architect',
-          implementation: 'developer',
-          review: 'reviewer',
-          testing: 'tester',
-        };
-        setCurrentExpertRole(roleMap[nextPhase]);
-      }
+      await doConfirmState(currentSession.id);
     } catch (error) {
       console.error('阶段确认失败:', error);
     }
   };
 
-  // 回退修改
-  const handleRollback = async () => {
+  // 可回退目标（按距离当前状态从近到远排序）
+  const rollbackTargets = currentSession
+    ? (stateInfo?.can_rollback_to ?? [])
+        .slice()
+        .sort((a, b) => stateOrder.indexOf(b) - stateOrder.indexOf(a))
+    : [];
+
+  // 回退到指定状态
+  const handleRollback = async (target: TechExpertState) => {
     if (!currentSession) return;
     try {
-      await doPhaseAction({
-        session_id: currentSession.id,
-        action: 'rollback',
-      });
+      await doRollbackState({ session_id: currentSession.id, target_state: target });
+      setShowRollbackDropdown(false);
     } catch (error) {
       console.error('回退失败:', error);
     }
   };
 
   // 切换专家
-  const handleSwitchExpert = async (role: ExpertRole) => {
+  const handleSwitchExpert = async (role: ExpertType) => {
     if (!currentSession) return;
     try {
       await doSwitchExpert({
         session_id: currentSession.id,
-        expert_role: role,
+        expert_type: role,
       });
       setShowExpertDropdown(false);
     } catch (error) {
@@ -284,15 +306,10 @@ export default function TechExperts() {
                 >
                   <div className="font-medium truncate mb-1">{session.title}</div>
                   <div className="flex items-center gap-2 text-xs text-text-tertiary">
-                    <span className={`px-1.5 py-0.5 rounded text-xs ${
-                      session.current_phase === 'architecture' ? 'bg-purple-100 text-purple-600' :
-                      session.current_phase === 'implementation' ? 'bg-primary-100 text-primary-600' :
-                      session.current_phase === 'review' ? 'bg-accent-100 text-accent-600' :
-                      'bg-danger-100 text-danger-600'
-                    }`}>
-                      {phases.find((p) => p.key === session.current_phase)?.label}
+                    <span className={`px-1.5 py-0.5 rounded text-xs ${stateColor[session.current_state]}`}>
+                      {session.current_state_label || STATE_LABELS[session.current_state]}
                     </span>
-                    <span>第 {session.current_iteration} 轮</span>
+                    <span>第 {session.iteration_count} 轮</span>
                   </div>
                 </button>
               ))}
@@ -311,7 +328,7 @@ export default function TechExperts() {
                 <h2 className="text-lg font-semibold text-text">{currentSession.title}</h2>
                 <div className="flex items-center gap-2 text-sm">
                   <span className="text-text-tertiary">迭代轮次：</span>
-                  <span className="font-medium text-primary-600">第 {currentSession.current_iteration} 轮</span>
+                  <span className="font-medium text-primary-600">第 {currentSession.iteration_count} 轮</span>
                 </div>
               </div>
 
@@ -375,7 +392,7 @@ export default function TechExperts() {
                     {currentExpert?.name}已就位
                   </h3>
                   <p className="text-text-secondary max-w-md">
-                    您好！我是{currentExpert?.name}，很高兴为您服务。请描述您的需求，我将为您提供专业的{phases.find((p) => p.key === currentSession.current_phase)?.label}服务。
+                    您好！我是{currentExpert?.name}，很高兴为您服务。请描述您的需求，我将为您提供专业的{currentSession.current_state_label || STATE_LABELS[currentSession.current_state]}服务。
                   </p>
                 </div>
               ) : (
@@ -388,20 +405,20 @@ export default function TechExperts() {
                       <div className="flex gap-3 max-w-3xl">
                         {/* 专家头像 */}
                         <div className="flex-shrink-0">
-                          <div className={`w-10 h-10 rounded-full ${expertRoles.find((e) => e.key === message.expert_role)?.color || 'bg-primary-500'} flex items-center justify-center text-white text-lg`}>
-                            {expertRoles.find((e) => e.key === message.expert_role)?.avatar || '🤖'}
+                          <div className={`w-10 h-10 rounded-full ${expertRoles.find((e) => e.key === message.expert_type)?.color || 'bg-primary-500'} flex items-center justify-center text-white text-lg`}>
+                            {expertRoles.find((e) => e.key === message.expert_type)?.avatar || '🤖'}
                           </div>
                         </div>
 
                         {/* 消息内容 */}
-                        <div className={`flex-1 bg-white rounded-xl shadow-soft p-4 border-l-4 ${expertRoles.find((e) => e.key === message.expert_role)?.borderColor || 'border-l-primary-500'}`}>
+                        <div className={`flex-1 bg-white rounded-xl shadow-soft p-4 border-l-4 ${expertRoles.find((e) => e.key === message.expert_type)?.borderColor || 'border-l-primary-500'}`}>
                           {/* 专家标签 */}
                           <div className="flex items-center gap-2 mb-2">
                             <span className="font-medium text-text text-sm">
-                              {message.expert_name || '专家'}
+                              {expertRoles.find((e) => e.key === message.expert_type)?.name || '专家'}
                             </span>
                             <span className="px-2 py-0.5 bg-gray-100 text-text-tertiary text-xs rounded">
-                              {phases.find((p) => p.key === message.phase)?.label}
+                              {message.state_label ? (STATE_LABELS[message.state_label as TechExpertState] || message.state_label) : ''}
                             </span>
                             <span className="text-xs text-text-tertiary">
                               第 {message.iteration} 轮
@@ -434,17 +451,34 @@ export default function TechExperts() {
                                 </svg>
                                 确认进入下一阶段
                               </Button>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={handleRollback}
-                                disabled={loading.phaseAction || currentSession.current_iteration <= 1}
-                              >
-                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
-                                </svg>
-                                回退修改
-                              </Button>
+                              {/* 回退下拉 */}
+                              <div className="relative" ref={rollbackDropdownRef}>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => setShowRollbackDropdown(!showRollbackDropdown)}
+                                  disabled={loading.phaseAction || rollbackTargets.length === 0}
+                                >
+                                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
+                                  </svg>
+                                  回退修改
+                                </Button>
+                                {showRollbackDropdown && rollbackTargets.length > 0 && (
+                                  <div className="absolute left-0 top-full mt-1 w-44 bg-white rounded-lg shadow-large border border-gray-100 py-1 z-20 animate-fade-in">
+                                    {rollbackTargets.map((target) => (
+                                      <button
+                                        key={target}
+                                        onClick={() => handleRollback(target)}
+                                        className="w-full px-3 py-2 text-left text-sm flex items-center gap-2 hover:bg-gray-50 text-text-secondary"
+                                      >
+                                        <span>{phases.find((p) => p.key === target)?.icon || '↩️'}</span>
+                                        回退到 {STATE_LABELS[target]}
+                                      </button>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
 
                               {/* 切换专家下拉 */}
                               <div className="relative ml-auto" ref={expertDropdownRef}>
@@ -521,49 +555,6 @@ export default function TechExperts() {
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
                   </svg>
                 </button>
-
-                {/* 选择知识库 */}
-                <div className="relative" ref={kbDropdownRef}>
-                  <button
-                    onClick={() => setShowKbDropdown(!showKbDropdown)}
-                    className="p-2 rounded-lg text-text-tertiary hover:text-text-secondary hover:bg-gray-50 transition-colors flex items-center gap-1"
-                    title="选择知识库"
-                  >
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
-                    </svg>
-                    <span className="text-xs">知识库</span>
-                  </button>
-                  {showKbDropdown && (
-                    <div className="absolute left-0 bottom-full mb-1 w-56 bg-white rounded-lg shadow-large border border-gray-100 py-1 z-10 animate-fade-in max-h-64 overflow-y-auto">
-                      <div className="px-3 py-2 text-xs text-text-tertiary border-b border-gray-50">
-                        选择关联知识库
-                      </div>
-                      {knowledgeBases.length === 0 ? (
-                        <div className="px-3 py-4 text-center text-sm text-text-tertiary">
-                          暂无知识库
-                        </div>
-                      ) : (
-                        knowledgeBases.map((kb) => (
-                          <button
-                            key={kb.id}
-                            onClick={() => {
-                              setNewSessionKbId(kb.id);
-                              setShowKbDropdown(false);
-                            }}
-                            className={`w-full px-3 py-2 text-left text-sm hover:bg-gray-50 ${
-                              currentSession.knowledge_base_id === kb.id
-                                ? 'text-primary-600 bg-primary-50'
-                                : 'text-text-secondary'
-                            }`}
-                          >
-                            {kb.name}
-                          </button>
-                        ))
-                      )}
-                    </div>
-                  )}
-                </div>
 
                 <div className="flex-1" />
 
@@ -653,24 +644,6 @@ export default function TechExperts() {
             required
             maxLength={100}
           />
-
-          <div>
-            <label className="block text-sm font-medium text-text mb-1.5">
-              关联知识库（可选）
-            </label>
-            <select
-              className="w-full h-10 px-4 border border-gray-200 rounded-lg text-sm text-text focus:outline-none focus:ring-2 focus:ring-primary-100 focus:border-primary-400 bg-white"
-              value={newSessionKbId || ''}
-              onChange={(e) => setNewSessionKbId(e.target.value ? Number(e.target.value) : undefined)}
-            >
-              <option value="">不关联知识库</option>
-              {knowledgeBases.map((kb) => (
-                <option key={kb.id} value={kb.id}>
-                  {kb.name}
-                </option>
-              ))}
-            </select>
-          </div>
 
           <div className="p-4 bg-primary-50 rounded-xl">
             <h4 className="font-medium text-primary-700 mb-2">工作流程</h4>

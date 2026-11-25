@@ -128,35 +128,39 @@ export interface SearchResponse {
 
 // ==================== 技术专家组相关类型 ====================
 
-/** 专家角色 */
-export type ExpertRole = 'architect' | 'developer' | 'reviewer' | 'tester';
+/** 专家类型 */
+export type ExpertType = 'architect' | 'coder' | 'reviewer' | 'tester';
 
-/** 专家阶段 */
-export type ExpertPhase = 'architecture' | 'implementation' | 'review' | 'testing';
+/** 技术专家状态 */
+export type TechExpertState = 'idle' | 'arch_design' | 'code_impl' | 'code_review' | 'testing' | 'done';
 
 /** 会话状态 */
 export type SessionStatus = 'active' | 'completed' | 'archived';
 
 /** 专家信息 */
 export interface Expert {
-  role: ExpertRole;
+  type: ExpertType;
   name: string;
-  avatar: string;
-  description: string;
+  icon: string;
   color: string;
+  description: string;
+  state?: string;
 }
 
 /** 专家会话 */
 export interface ExpertSession {
   id: number;
   title: string;
-  current_phase: ExpertPhase;
-  current_iteration: number;
+  current_state: TechExpertState;
+  current_state_label?: string;
+  iteration_count: number;
   status: SessionStatus;
-  knowledge_base_id?: number;
-  created_by: number;
-  created_at: string;
-  updated_at: string;
+  total_tokens?: number;
+  user_id?: number;
+  max_iterations?: number;
+  acceptance_criteria?: Record<string, unknown> | null;
+  created_at?: string;
+  updated_at?: string;
 }
 
 /** 专家消息 */
@@ -165,56 +169,49 @@ export interface ExpertMessage {
   session_id: number;
   role: 'user' | 'assistant' | 'system';
   content: string;
-  expert_role?: ExpertRole;
-  expert_name?: string;
-  phase: ExpertPhase;
+  expert_type?: ExpertType | null;
+  state_label?: string | null;
   iteration: number;
+  token_usage?: number;
   is_streaming?: boolean;
   created_at: string;
 }
 
-/** 状态转换记录 */
-export interface StateTransition {
-  id: number;
-  session_id: number;
-  from_phase: ExpertPhase;
-  to_phase: ExpertPhase;
+/** 状态信息 */
+export interface StateInfo {
+  current_state: TechExpertState;
+  current_state_label: string;
+  current_expert?: ExpertType | null;
+  current_expert_name?: string | null;
   iteration: number;
-  action: 'confirm' | 'rollback' | 'switch_expert';
-  created_at: string;
+  can_confirm: boolean;
+  can_rollback_to: TechExpertState[];
+  pause_for_human: boolean;
 }
 
 /** 创建会话请求 */
 export interface CreateSessionRequest {
-  title: string;
-  knowledge_base_id?: number;
+  title?: string;
+  initial_message?: string;
 }
 
 /** 发送消息请求 */
 export interface SendMessageRequest {
   session_id: number;
-  content: string;
-  expert_role?: ExpertRole;
-}
-
-/** 阶段操作请求 */
-export interface PhaseActionRequest {
-  session_id: number;
-  action: 'confirm' | 'rollback';
-  feedback?: string;
+  message: string;
 }
 
 /** 切换专家请求 */
 export interface SwitchExpertRequest {
   session_id: number;
-  expert_role: ExpertRole;
+  expert_type: ExpertType;
 }
 
-/** 阶段进度 */
-export interface PhaseProgress {
-  phase: ExpertPhase;
-  status: 'completed' | 'current' | 'pending';
-  label: string;
+/** 回退请求 */
+export interface RollbackRequest {
+  session_id: number;
+  target_state: TechExpertState;
+  reason?: string;
 }
 
 // ==================== 微信公众号写作助手相关类型 ====================

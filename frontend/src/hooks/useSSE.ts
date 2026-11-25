@@ -1,9 +1,10 @@
 /**
  * SSE 流式请求 Hook
- * 用于处理 Server-Sent Events 流式响应
+ * 使用 fetch POST + ReadableStream 处理 Server-Sent Events 流式响应
  */
 
 import { useState, useRef, useCallback, useEffect } from 'react';
+import { storage } from '@/utils/storage';
 
 // ==================== 类型定义 ====================
 
@@ -13,34 +14,33 @@ export interface SSEOptions {
   /** 收到消息回调 */
   onMessage?: (data: Record<string, unknown> | string) => void;
   /** 错误回调 */
-  onError?: (error: Event) => void;
+  onError?: (error: Error) => void;
   /** 连接关闭回调 */
   onClose?: () => void;
-  /** 自定义请求头 */
+  /** 默认请求头 */
   headers?: Record<string, string>;
-  /** 是否自动重连 */
-  autoReconnect?: boolean;
-  /** 最大重连次数 */
-  maxReconnectAttempts?: number;
-  /** 重连间隔（毫秒） */
-  reconnectInterval?: number;
+}
+
+export interface StreamRequestOptions {
+  /** POST 请求体（会被 JSON 序列化） */
+  body?: unknown;
+  /** 额外请求头 */
+  headers?: Record<string, string>;
 }
 
 export interface UseSSEReturn {
   /** 是否连接中 */
   isConnected: boolean;
-  /** 是否正在连接 */
+  /** 是否正在建立连接 */
   isConnecting: boolean;
   /** 错误信息 */
   error: string | null;
   /** 已接收的消息列表 */
   messages: (Record<string, unknown> | string)[];
   /** 开始连接 */
-  startStream: (url: string) => void;
+  startStream: (url: string, options?: StreamRequestOptions) => void;
   /** 停止连接 */
   stopStream: () => void;
-  /** 重连 */
-  reconnect: () => void;
   /** 清空消息 */
   clearMessages: () => void;
 }
@@ -53,9 +53,7 @@ export function useSSE(options: SSEOptions = {}): UseSSEReturn {
     onMessage,
     onError,
     onClose,
-    autoReconnect = false,
-    maxReconnectAttempts = 3,
-    reconnectInterval = 1000,
+    headers: defaultHeaders,
   } = options;
 
   const [isConnected, setIsConnected] = useState(false);
@@ -63,141 +61,112 @@ export function useSSE(options: SSEOptions = {}): UseSSEReturn {
   const [error, setError] = useState<string | null>(null);
   const [messages, setMessages] = useState<(Record<string, unknown> | string)[]>([]);
 
-  const eventSourceRef = useRef<EventSource | null>(null);
-  const urlRef = useRef<string>('');
-  const reconnectAttemptsRef = useRef(0);
-  const reconnectTimerRef = useRef<number | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
-  /**
-   * 处理连接打开
-   */
-  const handleOpen = useCallback(() => {
-    setIsConnected(true);
-    setIsConnecting(false);
-    setError(null);
-    reconnectAttemptsRef.current = 0;
-    onOpen?.();
-  }, [onOpen]);
-
-  /**
-   * 处理消息接收
-   */
-  const handleMessage = useCallback(
-    (event: MessageEvent) => {
-      let data: Record<string, unknown> | string;
-
-      try {
-        data = JSON.parse(event.data);
-      } catch {
-        data = event.data;
-      }
-
-      setMessages((prev) => [...prev, data]);
-      onMessage?.(data);
-    },
-    [onMessage]
-  );
-
-  /**
-   * 处理错误
-   */
-  const handleError = useCallback(
-    (event: Event) => {
-      setIsConnected(false);
-      setIsConnecting(false);
-      setError('SSE 连接错误');
-
-      // 自动重连
-      if (autoReconnect && reconnectAttemptsRef.current < maxReconnectAttempts) {
-        reconnectAttemptsRef.current += 1;
-        const delay = reconnectInterval * reconnectAttemptsRef.current;
-
-        reconnectTimerRef.current = window.setTimeout(() => {
-          if (urlRef.current) {
-            startStreamInternal(urlRef.current);
-          }
-        }, delay);
-      }
-
-      onError?.(event);
-    },
-    [autoReconnect, maxReconnectAttempts, reconnectInterval, onError]
-  );
-
-  /**
-   * 内部开始连接
-   */
-  const startStreamInternal = useCallback(
-    (url: string) => {
-      // 清除旧的连接
-      if (eventSourceRef.current) {
-        eventSourceRef.current.close();
-        eventSourceRef.current = null;
-      }
-
-      setIsConnecting(true);
-      setError(null);
-
-      try {
-        const eventSource = new EventSource(url);
-        eventSourceRef.current = eventSource;
-
-        eventSource.onopen = handleOpen;
-        eventSource.onmessage = handleMessage;
-        eventSource.onerror = handleError;
-      } catch (err) {
-        setIsConnecting(false);
-        setError(err instanceof Error ? err.message : '创建 SSE 连接失败');
-      }
-    },
-    [handleOpen, handleMessage, handleError]
-  );
-
-  /**
-   * 开始流式连接
-   */
-  const startStream = useCallback(
-    (url: string) => {
-      urlRef.current = url;
-      reconnectAttemptsRef.current = 0;
-      setMessages([]);
-      startStreamInternal(url);
-    },
-    [startStreamInternal]
-  );
-
-  /**
-   * 停止流式连接
-   */
   const stopStream = useCallback(() => {
-    if (reconnectTimerRef.current) {
-      clearTimeout(reconnectTimerRef.current);
-      reconnectTimerRef.current = null;
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
     }
-
-    if (eventSourceRef.current) {
-      eventSourceRef.current.close();
-      eventSourceRef.current = null;
-    }
-
     setIsConnected(false);
     setIsConnecting(false);
     onClose?.();
   }, [onClose]);
 
-  /**
-   * 重连
-   */
-  const reconnect = useCallback(() => {
-    if (urlRef.current) {
-      reconnectAttemptsRef.current = 0;
-      startStreamInternal(urlRef.current);
-    }
-  }, [startStreamInternal]);
+  const startStream = useCallback(
+    async (url: string, streamOptions: StreamRequestOptions = {}) => {
+      stopStream();
 
-  /**
-   * 清空消息
-   */
+      setIsConnecting(true);
+      setError(null);
+      setMessages([]);
+
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
+
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        Accept: 'text/event-stream',
+        ...defaultHeaders,
+        ...streamOptions.headers,
+      };
+      const token = storage.getToken();
+      if (token) {
+        headers.Authorization = `Bearer ${token}`;
+      }
+
+      try {
+        const response = await fetch(url, {
+          method: 'POST',
+          headers,
+          body: streamOptions.body !== undefined ? JSON.stringify(streamOptions.body) : undefined,
+          signal: controller.signal,
+        });
+
+        if (!response.ok) {
+          throw new Error(`请求失败 (${response.status})`);
+        }
+        if (!response.body) {
+          throw new Error('浏览器不支持流式响应');
+        }
+
+        setIsConnected(true);
+        setIsConnecting(false);
+        onOpen?.();
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder('utf-8');
+        let buffer = '';
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+
+          let sepIndex: number;
+          while ((sepIndex = buffer.indexOf('\n\n')) !== -1) {
+            const rawEvent = buffer.slice(0, sepIndex);
+            buffer = buffer.slice(sepIndex + 2);
+
+            const dataLines = rawEvent
+              .split('\n')
+              .filter((line) => line.startsWith('data:'))
+              .map((line) => line.slice(5).trimStart());
+
+            if (dataLines.length === 0) continue;
+
+            const dataStr = dataLines.join('\n');
+            let parsed: Record<string, unknown> | string;
+            try {
+              parsed = JSON.parse(dataStr);
+            } catch {
+              parsed = dataStr;
+            }
+
+            setMessages((prev) => [...prev, parsed]);
+            onMessage?.(parsed);
+          }
+        }
+      } catch (err) {
+        if ((err as Error).name === 'AbortError') {
+          // 主动停止，不算错误
+        } else {
+          const message = err instanceof Error ? err.message : '流式请求失败';
+          setError(message);
+          onError?.(err instanceof Error ? err : new Error(message));
+        }
+      } finally {
+        setIsConnected(false);
+        setIsConnecting(false);
+        if (abortControllerRef.current === controller) {
+          abortControllerRef.current = null;
+        }
+      }
+    },
+    [stopStream, defaultHeaders, onOpen, onMessage, onError]
+  );
+
   const clearMessages = useCallback(() => {
     setMessages([]);
   }, []);
@@ -216,7 +185,6 @@ export function useSSE(options: SSEOptions = {}): UseSSEReturn {
     messages,
     startStream,
     stopStream,
-    reconnect,
     clearMessages,
   };
 }

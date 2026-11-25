@@ -1,6 +1,6 @@
 /**
  * 技术专家组状态管理
- * 管理会话列表、当前会话、消息列表、阶段进度等
+ * 管理会话列表、当前会话、消息列表、状态信息等
  */
 
 import { create } from 'zustand';
@@ -11,9 +11,10 @@ import {
   deleteSession,
   getMessages,
   sendMessage,
-  phaseAction,
+  confirmState,
+  rollbackState,
   switchExpert,
-  getPhaseProgress,
+  getStateInfo,
   getExperts,
 } from '@/api/techExperts';
 import type {
@@ -22,11 +23,11 @@ import type {
   Expert,
   CreateSessionRequest,
   SendMessageRequest,
-  PhaseActionRequest,
   SwitchExpertRequest,
-  PhaseProgress,
-  ExpertRole,
-  ExpertPhase,
+  RollbackRequest,
+  StateInfo,
+  ExpertType,
+  TechExpertState,
 } from '@/api/types';
 
 // ==================== 状态类型定义 ====================
@@ -40,10 +41,10 @@ interface TechExpertsState {
   messages: ExpertMessage[];
   /** 专家列表 */
   experts: Expert[];
-  /** 阶段进度 */
-  phaseProgress: PhaseProgress[];
-  /** 当前专家角色 */
-  currentExpertRole: ExpertRole;
+  /** 当前状态信息 */
+  stateInfo: StateInfo | null;
+  /** 当前专家类型 */
+  currentExpertRole: ExpertType;
   /** 是否正在加载 */
   loading: {
     sessions: boolean;
@@ -59,7 +60,6 @@ interface TechExpertsState {
   /** 分页信息 */
   pagination: {
     sessions: { page: number; pageSize: number; total: number };
-    messages: { page: number; pageSize: number; total: number };
   };
 }
 
@@ -75,27 +75,29 @@ interface TechExpertsActions {
   /** 设置当前会话 */
   setCurrentSession: (session: ExpertSession | null) => void;
   /** 获取消息列表 */
-  fetchMessages: (sessionId: number, page?: number, pageSize?: number) => Promise<void>;
-  /** 发送消息 */
-  send: (data: SendMessageRequest) => Promise<ExpertMessage>;
+  fetchMessages: (sessionId: number) => Promise<void>;
+  /** 发送消息（同步模式） */
+  send: (data: SendMessageRequest) => Promise<void>;
   /** 添加用户消息（乐观更新） */
   addUserMessage: (content: string) => void;
   /** 添加专家消息（用于流式输出开始） */
-  addStreamingMessage: (expertRole?: ExpertRole) => void;
+  addStreamingMessage: (expertType?: ExpertType) => void;
   /** 更新流式消息内容 */
   updateStreamingMessage: (content: string, append?: boolean) => void;
   /** 结束流式输出 */
   finishStreaming: () => void;
-  /** 阶段操作 */
-  doPhaseAction: (data: PhaseActionRequest) => Promise<void>;
+  /** 确认当前状态 */
+  doConfirmState: (sessionId: number) => Promise<void>;
+  /** 回退到指定状态 */
+  doRollbackState: (data: RollbackRequest) => Promise<void>;
   /** 切换专家 */
   doSwitchExpert: (data: SwitchExpertRequest) => Promise<void>;
-  /** 获取阶段进度 */
-  fetchPhaseProgress: (sessionId: number) => Promise<void>;
+  /** 获取当前状态信息 */
+  fetchStateInfo: (sessionId: number) => Promise<void>;
   /** 获取专家列表 */
   fetchExperts: () => Promise<void>;
-  /** 设置当前专家角色 */
-  setCurrentExpertRole: (role: ExpertRole) => void;
+  /** 设置当前专家类型 */
+  setCurrentExpertRole: (role: ExpertType) => void;
   /** 清除错误 */
   clearError: () => void;
   /** 重置状态 */
@@ -111,7 +113,7 @@ const initialState: TechExpertsState = {
   currentSession: null,
   messages: [],
   experts: [],
-  phaseProgress: [],
+  stateInfo: null,
   currentExpertRole: 'architect',
   loading: {
     sessions: false,
@@ -124,36 +126,22 @@ const initialState: TechExpertsState = {
   streamingMessageIndex: null,
   pagination: {
     sessions: { page: 1, pageSize: 20, total: 0 },
-    messages: { page: 1, pageSize: 50, total: 0 },
   },
 };
 
 // ==================== 工具函数 ====================
 
 /**
- * 根据阶段获取对应专家角色
+ * 根据状态获取对应专家类型
  */
-function getExpertRoleForPhase(phase: ExpertPhase): ExpertRole {
-  const roleMap: Record<ExpertPhase, ExpertRole> = {
-    architecture: 'architect',
-    implementation: 'developer',
-    review: 'reviewer',
+function getExpertTypeForState(state: TechExpertState): ExpertType | null {
+  const typeMap: Partial<Record<TechExpertState, ExpertType>> = {
+    arch_design: 'architect',
+    code_impl: 'coder',
+    code_review: 'reviewer',
     testing: 'tester',
   };
-  return roleMap[phase];
-}
-
-/**
- * 根据专家角色获取专家名称
- */
-function getExpertName(role: ExpertRole): string {
-  const nameMap: Record<ExpertRole, string> = {
-    architect: '架构师',
-    developer: '开发工程师',
-    reviewer: '代码审查员',
-    tester: '测试工程师',
-  };
-  return nameMap[role];
+  return typeMap[state] ?? null;
 }
 
 /**
@@ -180,8 +168,8 @@ export const useTechExpertsStore = create<TechExpertsStore>((set, get) => ({
         pagination: {
           ...state.pagination,
           sessions: {
-            page: response.page,
-            pageSize: response.page_size,
+            page,
+            pageSize,
             total: response.total,
           },
         },
@@ -198,7 +186,7 @@ export const useTechExpertsStore = create<TechExpertsStore>((set, get) => ({
       const session = await getSession(sessionId);
       set({
         currentSession: session,
-        currentExpertRole: getExpertRoleForPhase(session.current_phase),
+        currentExpertRole: getExpertTypeForState(session.current_state) ?? 'architect',
       });
     } catch (error) {
       console.error('获取会话详情失败:', error);
@@ -211,9 +199,9 @@ export const useTechExpertsStore = create<TechExpertsStore>((set, get) => ({
     set((state) => ({
       sessions: [session, ...state.sessions],
       currentSession: session,
-      currentExpertRole: getExpertRoleForPhase(session.current_phase),
+      currentExpertRole: getExpertTypeForState(session.current_state) ?? 'architect',
       messages: [],
-      phaseProgress: [],
+      stateInfo: null,
     }));
     return session;
   },
@@ -232,29 +220,21 @@ export const useTechExpertsStore = create<TechExpertsStore>((set, get) => ({
     set({
       currentSession: session,
       messages: [],
-      phaseProgress: [],
+      stateInfo: null,
       streamingMessageIndex: null,
-      currentExpertRole: session ? getExpertRoleForPhase(session.current_phase) : 'architect',
+      currentExpertRole: session ? (getExpertTypeForState(session.current_state) ?? 'architect') : 'architect',
     });
   },
 
   // 获取消息列表
-  fetchMessages: async (sessionId: number, page = 1, pageSize = 50) => {
+  fetchMessages: async (sessionId: number) => {
     set((state) => ({ loading: { ...state.loading, messages: true }, error: null }));
 
     try {
-      const response = await getMessages(sessionId, { page, page_size: pageSize });
+      const messages = await getMessages(sessionId);
       set((state) => ({
-        messages: response.items.reverse(), // 旧消息在前
+        messages,
         loading: { ...state.loading, messages: false },
-        pagination: {
-          ...state.pagination,
-          messages: {
-            page: response.page,
-            pageSize: response.page_size,
-            total: response.total,
-          },
-        },
       }));
     } catch (error) {
       const message = error instanceof Error ? error.message : '获取消息列表失败';
@@ -262,17 +242,14 @@ export const useTechExpertsStore = create<TechExpertsStore>((set, get) => ({
     }
   },
 
-  // 发送消息
+  // 发送消息（同步模式）
   send: async (data: SendMessageRequest) => {
     set((state) => ({ loading: { ...state.loading, send: true } }));
 
     try {
-      const message = await sendMessage(data);
-      set((state) => ({
-        messages: [...state.messages, message],
-        loading: { ...state.loading, send: false },
-      }));
-      return message;
+      await sendMessage(data);
+      await get().fetchMessages(data.session_id);
+      set((state) => ({ loading: { ...state.loading, send: false } }));
     } catch (error) {
       set((state) => ({ loading: { ...state.loading, send: false } }));
       throw error;
@@ -281,7 +258,7 @@ export const useTechExpertsStore = create<TechExpertsStore>((set, get) => ({
 
   // 添加用户消息（乐观更新）
   addUserMessage: (content: string) => {
-    const { currentSession, currentExpertRole } = get();
+    const { currentSession } = get();
     if (!currentSession) return;
 
     const userMessage: ExpertMessage = {
@@ -289,8 +266,9 @@ export const useTechExpertsStore = create<TechExpertsStore>((set, get) => ({
       session_id: currentSession.id,
       role: 'user',
       content,
-      phase: currentSession.current_phase,
-      iteration: currentSession.current_iteration,
+      expert_type: null,
+      state_label: currentSession.current_state,
+      iteration: currentSession.iteration_count,
       created_at: new Date().toISOString(),
     };
 
@@ -300,20 +278,19 @@ export const useTechExpertsStore = create<TechExpertsStore>((set, get) => ({
   },
 
   // 添加专家消息（流式输出开始）
-  addStreamingMessage: (expertRole?: ExpertRole) => {
+  addStreamingMessage: (expertType?: ExpertType) => {
     const { currentSession, currentExpertRole } = get();
     if (!currentSession) return;
 
-    const role = expertRole || currentExpertRole;
+    const type = expertType || currentExpertRole;
     const streamingMessage: ExpertMessage = {
       id: generateTempId(),
       session_id: currentSession.id,
       role: 'assistant',
       content: '',
-      expert_role: role,
-      expert_name: getExpertName(role),
-      phase: currentSession.current_phase,
-      iteration: currentSession.current_iteration,
+      expert_type: type,
+      state_label: currentSession.current_state,
+      iteration: currentSession.iteration_count,
       is_streaming: true,
       created_at: new Date().toISOString(),
     };
@@ -358,15 +335,29 @@ export const useTechExpertsStore = create<TechExpertsStore>((set, get) => ({
     });
   },
 
-  // 阶段操作
-  doPhaseAction: async (data: PhaseActionRequest) => {
+  // 确认当前状态
+  doConfirmState: async (sessionId: number) => {
     set((state) => ({ loading: { ...state.loading, phaseAction: true } }));
 
     try {
-      await phaseAction(data);
-      // 重新获取会话详情以更新阶段
+      await confirmState(sessionId);
+      await get().fetchSession(sessionId);
+      await get().fetchStateInfo(sessionId);
+      set((state) => ({ loading: { ...state.loading, phaseAction: false } }));
+    } catch (error) {
+      set((state) => ({ loading: { ...state.loading, phaseAction: false } }));
+      throw error;
+    }
+  },
+
+  // 回退到指定状态
+  doRollbackState: async (data: RollbackRequest) => {
+    set((state) => ({ loading: { ...state.loading, phaseAction: true } }));
+
+    try {
+      await rollbackState(data);
       await get().fetchSession(data.session_id);
-      await get().fetchPhaseProgress(data.session_id);
+      await get().fetchStateInfo(data.session_id);
       set((state) => ({ loading: { ...state.loading, phaseAction: false } }));
     } catch (error) {
       set((state) => ({ loading: { ...state.loading, phaseAction: false } }));
@@ -377,23 +368,22 @@ export const useTechExpertsStore = create<TechExpertsStore>((set, get) => ({
   // 切换专家
   doSwitchExpert: async (data: SwitchExpertRequest) => {
     try {
-      const session = await switchExpert(data);
-      set({
-        currentSession: session,
-        currentExpertRole: data.expert_role,
-      });
+      await switchExpert(data);
+      await get().fetchSession(data.session_id);
+      await get().fetchStateInfo(data.session_id);
+      set({ currentExpertRole: data.expert_type });
     } catch (error) {
       throw error;
     }
   },
 
-  // 获取阶段进度
-  fetchPhaseProgress: async (sessionId: number) => {
+  // 获取当前状态信息
+  fetchStateInfo: async (sessionId: number) => {
     try {
-      const progress = await getPhaseProgress(sessionId);
-      set({ phaseProgress: progress });
+      const info = await getStateInfo(sessionId);
+      set({ stateInfo: info });
     } catch (error) {
-      console.error('获取阶段进度失败:', error);
+      console.error('获取状态信息失败:', error);
     }
   },
 
@@ -407,8 +397,8 @@ export const useTechExpertsStore = create<TechExpertsStore>((set, get) => ({
     }
   },
 
-  // 设置当前专家角色
-  setCurrentExpertRole: (role: ExpertRole) => {
+  // 设置当前专家类型
+  setCurrentExpertRole: (role: ExpertType) => {
     set({ currentExpertRole: role });
   },
 
