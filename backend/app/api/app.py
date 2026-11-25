@@ -9,6 +9,7 @@ from app.core.config import settings
 from app.core.database import init_db
 from app.core.exceptions import register_exception_handlers, unified_response
 from app.core.plugin_manager import plugin_manager
+from app.plugins.daily_report.scheduler import daily_report_scheduler
 
 
 def create_app() -> FastAPI:
@@ -113,12 +114,16 @@ def create_app() -> FastAPI:
         for p in plugins:
             print(f"       - {p.name} v{p.version}: {p.description}")
 
+        # 启动学习日报定时任务
+        daily_report_scheduler.start()
+
         print("[启动] 服务启动完成！")
         print(f"[启动] API 文档: http://{settings.HOST}:{settings.PORT}/docs")
 
     @app.on_event("shutdown")
     async def shutdown_event():
         """应用关闭时执行"""
+        daily_report_scheduler.stop()
         print(f"[关闭] {settings.APP_NAME} 正在关闭...")
 
     return app

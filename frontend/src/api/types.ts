@@ -214,6 +214,89 @@ export interface RollbackRequest {
   reason?: string;
 }
 
+// ==================== 选材剪藏相关类型 ====================
+
+/** 剪藏记录 */
+export interface Clipping {
+  id: number;
+  url: string;
+  title: string;
+  site_name: string;
+  author: string;
+  summary: string;
+  tags: string;
+  category: string;
+  content_length: number;
+  kb_id: number;
+  document_id?: number | null;
+  status: 'ready' | 'failed';
+  error_msg?: string | null;
+  created_at: string;
+}
+
+/** 剪藏详情（含正文） */
+export interface ClippingDetail extends Clipping {
+  content_md: string;
+}
+
+/** 剪藏请求 */
+export interface ClipRequest {
+  url: string;
+  kb_id?: number;
+  category?: string;
+  tags?: string[];
+}
+
+/** 剪藏列表响应 */
+export interface ClippingListResponse {
+  items: Clipping[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+// ==================== 学习日报相关类型 ====================
+
+/** 日报数据统计 */
+export interface ReportStats {
+  clips: number;
+  clip_titles: string[];
+  documents: number;
+  expert_messages: number;
+  writer_messages: number;
+  writer_outputs: number;
+}
+
+/** 学习日报（列表项） */
+export interface DailyReport {
+  id: number;
+  report_date: string;
+  stats: ReportStats;
+  generated_by: 'llm' | 'fallback';
+  error_msg?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** 学习日报详情 */
+export interface DailyReportDetail extends DailyReport {
+  content_md: string;
+}
+
+/** 日报列表响应 */
+export interface DailyReportListResponse {
+  items: DailyReport[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+/** 生成日报请求 */
+export interface GenerateReportRequest {
+  report_date?: string;
+  force?: boolean;
+}
+
 // ==================== 微信公众号写作助手相关类型 ====================
 
 /** 写作状态 */

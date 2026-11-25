@@ -97,6 +97,20 @@ class Settings(BaseSettings):
         description="只索引包含指定标签的笔记（逗号分隔，空=全部）",
     )
 
+    # ========== 学习日报定时任务配置 ==========
+    # 是否启用每日定时生成学习日报
+    DAILY_REPORT_ENABLED: bool = Field(
+        default=True, description="是否启用每日定时生成学习日报"
+    )
+    # 触发小时（本地时区 24 小时制）
+    DAILY_REPORT_HOUR: int = Field(
+        default=22, ge=0, le=23, description="每日生成日报的小时（本地时区）"
+    )
+    # 触发分钟
+    DAILY_REPORT_MINUTE: int = Field(
+        default=0, ge=0, le=59, description="每日生成日报的分钟"
+    )
+
     # ========== 日志配置 ==========
     # 日志级别: DEBUG / INFO / WARNING / ERROR
     LOG_LEVEL: str = Field(default="INFO", description="日志级别")

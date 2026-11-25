@@ -12,6 +12,8 @@ import Register from '@/pages/Register';
 import Home from '@/pages/Home';
 import KnowledgeBase from '@/pages/KnowledgeBase';
 import TechExperts from '@/pages/TechExperts';
+import Clipper from '@/pages/Clipper';
+import DailyReport from '@/pages/DailyReport';
 import WeChatWriter from '@/pages/WeChatWriter';
 import { useUserStore } from '@/store/useUserStore';
 import Loading from '@/components/Common/Loading';
@@ -21,6 +23,8 @@ const pageTitles: Record<string, string> = {
   '/home': '工作台',
   '/knowledge': '知识库',
   '/knowledge-bases': '知识库',
+  '/clipper': '选材剪藏',
+  '/daily-reports': '学习日报',
   '/tech-experts': '技术专家组',
   '/wechat-writer': '公众号写作',
   '/profile': '个人中心',
@@ -37,6 +41,8 @@ const routeRegistry: { path: string; element: React.ReactNode }[] = [
   { path: '/knowledge', element: <KnowledgeBase /> },
   // 兼容后端插件菜单声明的 path（/knowledge-bases）
   { path: '/knowledge-bases', element: <KnowledgeBase /> },
+  { path: '/clipper', element: <Clipper /> },
+  { path: '/daily-reports', element: <DailyReport /> },
   { path: '/tech-experts', element: <TechExperts /> },
   { path: '/wechat-writer', element: <WeChatWriter /> },
 ];

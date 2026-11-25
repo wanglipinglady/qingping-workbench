@@ -14,6 +14,8 @@ import { getMenuIcon } from './menuIcons';
 const defaultMenuItems: MenuItem[] = [
   { key: 'home', label: '工作台', icon: 'home', path: '/home', order: 0 },
   { key: 'knowledge-base', label: '知识库', icon: 'book', path: '/knowledge-bases', order: 10 },
+  { key: 'clipper', label: '选材剪藏', icon: 'scissors', path: '/clipper', order: 15 },
+  { key: 'daily-report', label: '学习日报', icon: 'calendar', path: '/daily-reports', order: 16 },
   { key: 'tech-experts', label: '技术专家组', icon: 'brain', path: '/tech-experts', order: 20 },
   { key: 'wechat-writer', label: '公众号写作', icon: 'edit', path: '/wechat-writer', order: 20 },
   { key: 'user-profile', label: '个人中心', icon: 'user', path: '/profile', order: 100 },
